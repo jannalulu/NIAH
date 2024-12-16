@@ -1,3 +1,5 @@
+python download_rwkv_7.py
+
 python eval_rwkv.py \
     --tokenized PY007/tokenized_proof_pile_test_neox \
     --dataset-min-tokens 32768 \
