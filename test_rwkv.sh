@@ -8,6 +8,6 @@ python eval_rwkv.py \
     --tokens-step 2048 \
     --save-tokenized eval_dataset \
     --truncate \
-    -m RWKV-x070-Pile-168M-20241120-ctx4096 \
-    -m RWKV-x070-Pile-421M-20241127-ctx4096 \
-    -m RWKV-x070-Pile-1.47B-20241210-ctx4096
+    -m rwkv_model/RWKV-x070-Pile-168M-20241120-ctx4096 \
+    -m rwkv_model/RWKV-x070-Pile-421M-20241127-ctx4096 \
+    -m rwkv_model/RWKV-x070-Pile-1.47B-20241210-ctx4096
