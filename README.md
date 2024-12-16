@@ -1,3 +1,6 @@
+# Mamba Out! Long Live RWKV!
+<img src="data/rwkv7_vs_mamba.png" width="800">
+
 # LongMamba
 This repo contains my exploration of Mamba's context scaling. It includes code to: 1. train Mamba on a longer context. 2. evaluate Mamba's PPL on the proof pile test set. 3. perform needle in a haystack test (pass-key retrieval).
 
