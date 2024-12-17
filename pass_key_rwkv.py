@@ -59,18 +59,21 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
     len_token = len(input_ids)
     answer_ids = tokenizer.encode(answer).ids
     
+    # chunkwise prefill
+    CHUNK_SIZE = 4096
+    prefill_ids, next_token = input_ids[:-1], input_ids[-1]
+    state = None
+    for i in range(0, len(prefill_ids), CHUNK_SIZE):
+        prefill_token = prefill_ids[i: i+CHUNK_SIZE]
+        _, state = model(prefill_token, state)
+    
     # generate answer
     gen_length = len(answer_ids)
-    state = None
-    model_input = input_ids
     all_outputs = []
     for i in range(gen_length):
-        logits, state = model(model_input, state)
-        new_token = torch.argmax(logits, dim=-1).item()
-        all_outputs.append(new_token)
-        model_input = new_token
-        
-    # pdb.set_trace()
+        logits, state = model([next_token], state)
+        next_token = torch.argmax(logits, dim=-1).item()
+        all_outputs.append(next_token)
     
     model_answer = tokenizer.decode(all_outputs).strip()
     gold_answer = tokenizer.decode(answer_ids).strip()
@@ -85,18 +88,9 @@ def main(args):
 
     print("base model", args.base_model)
     # Load model and tokenizer
-    # model = MambaLMHeadModel.from_pretrained(
-    #     args.base_model,
-    #     dtype=torch.bfloat16,
-    #     device=device,
-    # )
-
-    # tokenizer = transformers.AutoTokenizer.from_pretrained(
-    #     "EleutherAI/gpt-neox-20b",
-    # )
     import os
     os.environ["RWKV_JIT_ON"] = "1"
-    os.environ["RWKV_CUDA_ON"] = "0"
+    os.environ["RWKV_CUDA_ON"] = "1"
     os.environ["RWKV_V7_ON"] = '1'
     
     from rwkv.model import RWKV
@@ -137,7 +131,7 @@ def main(args):
         pivot_table,
         # annot=True,
         vmin=0,
-        vmax=5,
+        vmax=args.num_tests,
         fmt="g",
         cmap=cmap,
         cbar_kws={'label': 'Score'}
