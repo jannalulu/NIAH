@@ -60,10 +60,25 @@ def compute_perplexity(
             target_ids = input_ids.clone()
             target_ids[:, :-trg_len] = -100
             with torch.no_grad():
-                # only get the logits for the last 1024 tokens:
+                
                 input_ids = input_ids[0].tolist()
-                logits, _ = model(input_ids, None, full_output=True)
-                logits = logits[..., :-1, :]
+                
+                # chunkwise prefill
+                CHUNK_SIZE = 4096
+                state = None
+                all_logits = None
+                for i in range(0, len(input_ids), CHUNK_SIZE):
+                    prefill_token = input_ids[i: i+CHUNK_SIZE]
+                    logits, state = model(prefill_token, state, full_output=True)
+                    if all_logits is None:
+                        all_logits = logits
+                    else:
+                        all_logits = torch.cat((all_logits, logits), dim=0)
+                
+                # non-chunkwise prefill
+                # logits, _ = model(input_ids, None, full_output=True)
+                
+                logits = all_logits[..., :-1, :]
                 # pdb.set_trace()
                 target_ids = target_ids[..., 1:].contiguous()
                 neg_log_likelihood = torch.nn.functional.cross_entropy(
@@ -149,15 +164,11 @@ def main(args):
     results = []
     for model in tqdm(models, desc="Model", leave=False, disable=args.hide_progress):
         torch.cuda.empty_cache()
-
-        # loaded = MambaLMHeadModel.from_pretrained(model, dtype=torch.bfloat16).to("cuda")
-        # loaded = torch.compile(loaded)
-        # loaded.eval()
         
         # load RWKV model
         import os
         os.environ["RWKV_JIT_ON"] = "1"
-        os.environ["RWKV_CUDA_ON"] = "0"
+        os.environ["RWKV_CUDA_ON"] = "1"
         os.environ["RWKV_V7_ON"] = '1'
         
         from rwkv.model import RWKV
