@@ -4,7 +4,12 @@ Run `test_rwkv.sh` to see how Mamba gets beaten badly by RWKV
 This is the original RWKV-7 trained on the Pile dataset, ctx 4096, no fancy tricks, no finetuning, just the original model.
 <img src="data/rwkv7_vs_mamba.png" width="800">
 <img src="data/rwkv_7_long.png" width="800">
+
+## Needle in a Haystack test
+RWKV-7 Pile 0.4b
 <img src="data/rwkv7_heatmap_32768.png" width="800">
+for comparison: Mamba 2.8B Slimpj long context fine-tuned version
+<img src="data/heatmap_32768.png" width="800">
 
 # LongMamba
 This repo contains my exploration of Mamba's context scaling. It includes code to: 1. train Mamba on a longer context. 2. evaluate Mamba's PPL on the proof pile test set. 3. perform needle in a haystack test (pass-key retrieval).
