@@ -2,6 +2,7 @@
 import os
 import math
 import torch
+import re
 import argparse
 import random
 import re
@@ -20,8 +21,9 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=20192, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
+
+    parser.add_argument('--min_tokens', type=int, default=21179, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=23779, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
     parser.add_argument('--min_depth', type=float, default=0.3, help='minimum depth ratio to start testing')
@@ -61,43 +63,16 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
     input_ids = input_ids.to(device)
     len_token = input_ids.shape[-1]
 
+    print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
+
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
     
-    CHUNK_SIZE = 4096
-    prefill_ids = input_ids[:, :-1]  # all tokens except last
-    next_token = input_ids[:, -1:]   # last token
-    past_key_values = None
-    last_chunk_start = 0
-
-    # Process chunks sequentially
-    for i in range(0, prefill_ids.shape[1], CHUNK_SIZE):
-        chunk = prefill_ids[:, i:i + CHUNK_SIZE]
-        
-        # Generate with the current chunk
-        outputs = model(
-            input_ids=chunk,
-            past_key_values=past_key_values,
-            use_cache=True,
-            return_dict=True
+    with torch.no_grad():
+        generation_output = model.generate(
+            input_ids=input_ids,
+            max_length=answer_ids.shape[-1] + input_ids.shape[-1],
+            use_cache=True
         )
-        
-        # Update past_key_values for next iteration
-        past_key_values = outputs.past_key_values
-        last_chunk_start = i + chunk.shape[1]
-
-        allocated = torch.cuda.memory_allocated(device) / 1024**2  # Convert to MB
-        max_allocated = torch.cuda.max_memory_allocated(device) / 1024**2  # Convert to MB
-        print(f"Chunk {i//CHUNK_SIZE + 1}: Current VRAM {allocated:.2f}MB, Peak VRAM {max_allocated:.2f}MB")
-
-    # Final generation with the last token
-    generation_output = model.generate(
-        input_ids=next_token,
-        past_key_values=past_key_values,
-        max_new_tokens=answer_ids.shape[-1],
-        pad_token_id=tokenizer.pad_token_id,
-        eos_token_id=tokenizer.eos_token_id,
-        use_cache=True
-    )
     
     model_output = tokenizer.decode(generation_output[0].cpu())
     
@@ -126,6 +101,8 @@ def main(args):
     model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True)
     model = model.to('cuda')
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
+
+    model.eval()
 
     # Calculate number of test points starting from min_tokens
     total_test_points = (args.max_tokens - args.min_tokens) // args.interval + 1
