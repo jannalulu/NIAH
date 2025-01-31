@@ -33,14 +33,16 @@ def parse_config():
     args = parser.parse_args()
     return args
 
-
 def generate_prompt_landmark(n_garbage, seed, n_garbage_prefix):
     """Generates a text file and inserts a passkey at a random position."""
     rnd_state = random.get_state()
     random.seed(seed)
     n_garbage_suffix = n_garbage - n_garbage_prefix
 
-    task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there."
+    task_description = (
+        "There is an important info hidden inside a lot of irrelevant text. "
+        "Find it and memorize them. I will quiz you about the important information there."
+    )
     garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again."
     garbage_inf = " ".join([garbage] * 5000)
     assert len(garbage_inf) >= n_garbage
@@ -59,58 +61,73 @@ def generate_prompt_landmark(n_garbage, seed, n_garbage_prefix):
     random.set_state(rnd_state)
     return "\n".join(lines), str(pass_key)
 
+def detach_state(state):
+    """Recursively detach all tensors in the given state from the computation graph."""
+    if isinstance(state, torch.Tensor):
+        return state.detach()
+    elif isinstance(state, dict):
+        return {k: detach_state(v) for k, v in state.items()}
+    elif isinstance(state, (tuple, list)):
+        return type(state)(detach_state(s) for s in state)
+    else:
+        return state
+
 def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage=60000, seed=666):
     prompt, answer = generate_prompt_landmark(n_garbage, seed, n_garbage_prefix)
-    input_ids = tokenizer(prompt, return_tensors="pt").input_ids
-    input_ids = input_ids.to(device)
-    len_token = input_ids.shape[-1]
-
+    input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
+
     print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
 
-    # chunkwise prefill
-    CHUNK_SIZE = 4096
+    CHUNK_SIZE = 2048
     state = None
     
     with torch.no_grad():
-        # Process all tokens in chunks
+        # -- Chunked pass to build up state
         for i in range(0, input_ids.shape[1], CHUNK_SIZE):
             chunk = input_ids[:, i:i + CHUNK_SIZE]
             outputs = model(
                 chunk,
                 state=state,
+                use_cache=False, 
+                output_attentions=False,
+                output_hidden_states=False,
             )
             current_mem = torch.cuda.memory_allocated(device) / 1024**2
             max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
             print(f"Memory usage before chunk {i//CHUNK_SIZE + 1}: {current_mem:.2f}MB / {max_mem:.2f}MB")
 
-            state = outputs.state if hasattr(outputs, 'state') else outputs[-1]
-        
+            ### Detach the state to prevent accumulation
+            state = outputs.state if hasattr(outputs, "state") else outputs[-1]
+            state = detach_state(state)
+
+            # Explicitly free everything else
+            del outputs
+            del chunk
+            torch.cuda.empty_cache()
+    
         generation_output = model.generate(
             input_ids=input_ids,
             max_length=answer_ids.shape[-1] + input_ids.shape[-1],
             use_cache=True
         )
-        
+    
+    # decode and compare answer
     model_output = tokenizer.decode(generation_output[0].cpu())
-    
-    # Find the number after "The pass key is"
     matches = re.findall(r"What is the pass key\? The pass key is (\d+)", model_output)
-    if matches:
-        model_answer = matches[0]  # Take the first match
-    else:
-        model_answer = ""
-    
+    model_answer = matches[0] if matches else ""
     is_correct = (model_answer == answer)
+    
     print(f"Model's output: {model_output}")
     print(f"Found answer: {model_answer}")
     print(f"Correct answer: {answer}")
     print(f"Is correct: {is_correct}\n")
 
+    # Epty cache after the test is fully done
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    
-    return is_correct, len_token
+
+    return is_correct, input_ids.shape[-1]
 
 def main(args):
     device = "cuda:0"
@@ -120,7 +137,7 @@ def main(args):
 
     # Load model and tokenizer
     model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True)
-    model = model.to('cuda')
+    model = model.to(device)
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
     model.eval()
@@ -145,10 +162,12 @@ def main(args):
             
             for k in range(args.num_tests):
                 is_correct, len_tokens = passkey_retrieval_test(
-                    model, tokenizer, device, n_garbage_prefix, 
-                    n_garbage=n_garbage, seed=k
+                    model, tokenizer, device, 
+                    n_garbage_prefix=n_garbage_prefix,
+                    n_garbage=n_garbage, 
+                    seed=k
                 )
-                passed_tests += is_correct
+                passed_tests += int(is_correct)
                 total_tokens += len_tokens
                 
             avg_tokens = total_tokens // args.num_tests
