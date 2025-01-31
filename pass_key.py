@@ -12,6 +12,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
+
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
@@ -59,12 +60,25 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
 
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
     generation_output = model.generate(
-        input_ids=input_ids, max_length=answer_ids.shape[-1] + input_ids.shape[-1]
+        input_ids=input_ids,
+        max_length=answer_ids.shape[-1] + input_ids.shape[-1]
     )
-    model_answer = generation_output[0, -answer_ids.shape[-1]:].cpu()
-    model_answer = tokenizer.decode(model_answer).strip()
-    gold_answer = tokenizer.decode(answer_ids[0]).strip()
-    is_correct = (model_answer == gold_answer)
+    model_output = tokenizer.decode(generation_output[0].cpu())
+    
+    # Find the number after "The pass key is"
+    import re
+    matches = re.findall(r"What is the pass key\? The pass key is (\d+)", model_output)
+    if matches:
+        model_answer = matches[0]  # Take the first match
+    else:
+        model_answer = ""
+    
+    is_correct = (model_answer == answer)
+    print(f"Model's output: {model_output}")
+    print(f"Found answer: {model_answer}")
+    print(f"Correct answer: {answer}")
+    print(f"Is correct: {is_correct}\n")
+    
     return is_correct, len_token
 
 def main(args):
@@ -75,6 +89,7 @@ def main(args):
 
     # Load model and tokenizer
     model = AutoModelForCausalLM.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
+    model = model.to('cuda')
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
     # Calculate number of test points starting from min_tokens
