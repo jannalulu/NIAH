@@ -61,37 +61,112 @@ def generate_prompt_landmark(n_garbage, seed, n_garbage_prefix):
     return "\n".join(lines), str(pass_key)
 
 def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage=60000, seed=666):
-    prompt, answer = generate_prompt_landmark(n_garbage, seed, n_garbage_prefix)
-    input_ids = tokenizer(prompt, return_tensors="pt").input_ids
-    input_ids = input_ids.to(device)
-    len_token = input_ids.shape[-1]
+    try:
+        prompt, answer = generate_prompt_landmark(n_garbage, seed, n_garbage_prefix)
+        input_ids = tokenizer(prompt, return_tensors="pt").input_ids
+        
+        if not torch.is_tensor(input_ids):
+            raise ValueError("Tokenization failed to produce a valid tensor")
+            
+        input_ids = input_ids.to(device)
+        len_token = input_ids.shape[-1]
 
-    print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
+        # Validate input dimensions
+        if len_token < 1:
+            raise ValueError(f"Input sequence length {len_token} is too short")
+            
+        print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
+        answer_ids = tokenizer(answer, return_tensors="pt").input_ids
 
-    answer_ids = tokenizer(answer, return_tensors="pt").input_ids
-    generation_output = model.generate(
-        input_ids=input_ids,
-        max_length=answer_ids.shape[-1] + input_ids.shape[-1],
-        use_cache=True
-    )
-    
-    model_output = tokenizer.decode(generation_output[0].cpu())
-    
-    # Find the number after "The pass key is"
-    matches = re.findall(r"What is the pass key\? The pass key is (\d+)", model_output)
-    if matches:
-        model_answer = matches[0]  # Take the first match
-    else:
-        model_answer = ""
-    
-    is_correct = (model_answer == answer)
-    print(f"Model's output: {model_output}")
-    print(f"Found answer: {model_answer}")
-    print(f"Correct answer: {answer}")
-    print(f"Is correct: {is_correct}\n")
-    
-    return is_correct, len_token
+        CHUNK_SIZE = 1024
+        prefill_ids = input_ids[:, :-1]  # all tokens except last
+        next_token = input_ids[:, -1:]   # last token
+        
+        if prefill_ids.shape[1] == 0:
+            raise ValueError("No tokens available for prefill after splitting")
+            
+        past_key_values = None
+        last_chunk_start = 0
+        
+        # Track if we've processed any chunks successfully
+        chunks_processed = 0
+        
+        # Process chunks sequentially
+        for i in range(0, prefill_ids.shape[1], CHUNK_SIZE):
+            try:
+                chunk = prefill_ids[:, i:i + CHUNK_SIZE]
+                
+                if chunk.shape[1] == 0:
+                    raise ValueError(f"Empty chunk encountered at position {i}")
+                
+                # Log memory usage for monitoring
+                current_mem = torch.cuda.memory_allocated(device) / 1024**2
+                max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
+                print(f"Memory usage before chunk {i//CHUNK_SIZE + 1}: {current_mem:.2f}MB / {max_mem:.2f}MB")
+                
+                # Generate with the current chunk
+                outputs = model(
+                    input_ids=chunk,
+                    past_key_values=past_key_values,
+                    use_cache=True,
+                    return_dict=True
+                )
+                
+                if not hasattr(outputs, 'past_key_values') or outputs.past_key_values is None:
+                    raise ValueError("Model failed to return past key values")
+                
+                # Update past_key_values for next iteration
+                past_key_values = outputs.past_key_values
+                last_chunk_start = i + chunk.shape[1]
+                chunks_processed += 1
+                
+            except RuntimeError as e:
+                if "out of memory" in str(e):
+                    torch.cuda.empty_cache()
+                    raise RuntimeError(f"GPU OOM at chunk {i//CHUNK_SIZE + 1}.")
+                raise e
+                
+        if chunks_processed == 0:
+            raise RuntimeError("No chunks were successfully processed")
 
+        try:
+            generation_output = model.generate(
+                input_ids=next_token,
+                past_key_values=past_key_values,
+                max_length=answer_ids.shape[-1],
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+            )
+            
+            if generation_output.shape[0] == 0:
+                raise ValueError("Generation produced empty output")
+                
+            model_output = tokenizer.decode(generation_output[0].cpu())
+            
+            # Find the number after "The pass key is"
+            matches = re.findall(r"What is the pass key\? The pass key is (\d+)", model_output)
+            if matches:
+                model_answer = matches[0]  # Take the first match
+            else:
+                model_answer = ""
+                print("Warning: Could not find pass key in model output")
+            
+            is_correct = (model_answer == answer)
+            print(f"Found answer: {model_answer}")
+            print(f"Correct answer: {answer}")
+            print(f"Is correct: {is_correct}\n")
+            
+            return is_correct, len_token
+            
+        except Exception as e:
+            print(f"Error during generation or post-processing: {str(e)}")
+            raise
+            
+    except Exception as e:
+        print(f"Fatal error in passkey retrieval test: {str(e)}")
+        # Return a failed test result rather than crashing
+        return False, 0
+  
 def main(args):
     device = "cuda:0"
     torch.cuda.set_device(device)
