@@ -1,4 +1,3 @@
-
 import os
 import math
 import torch
@@ -33,7 +32,6 @@ def parse_config():
 
     args = parser.parse_args()
     return args
-
 
 def generate_prompt_landmark(n_garbage, seed, n_garbage_prefix):
     """Generates a text file and inserts a passkey at a random position."""
@@ -92,81 +90,82 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
         chunks_processed = 0
         
         # Process chunks sequentially
-        for i in range(0, prefill_ids.shape[1], CHUNK_SIZE):
+        with torch.no_grad():
+            for i in range(0, prefill_ids.shape[1], CHUNK_SIZE):
+                try:
+                    chunk = prefill_ids[:, i:i + CHUNK_SIZE]
+                    
+                    if chunk.shape[1] == 0:
+                        raise ValueError(f"Empty chunk encountered at position {i}")
+                    
+                    # Log memory usage for monitoring
+                    current_mem = torch.cuda.memory_allocated(device) / 1024**2
+                    max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
+                    print(f"Memory usage before chunk {i//CHUNK_SIZE + 1}: {current_mem:.2f}MB / {max_mem:.2f}MB")
+                    
+                    # Generate with the current chunk
+                    outputs = model(
+                        input_ids=chunk,
+                        past_key_values=past_key_values,
+                        use_cache=True,
+                        return_dict=True
+                    )
+                    
+                    if not hasattr(outputs, 'past_key_values') or outputs.past_key_values is None:
+                        raise ValueError("Model failed to return past key values")
+                    
+                    # Update past_key_values for next iteration
+                    past_key_values = outputs.past_key_values
+                    last_chunk_start = i + chunk.shape[1]
+                    chunks_processed += 1
+                    
+                except RuntimeError as e:
+                    if "out of memory" in str(e):
+                        torch.cuda.empty_cache()
+                        raise RuntimeError(f"GPU OOM at chunk {i//CHUNK_SIZE + 1}.")
+                    raise e
+                    
+            if chunks_processed == 0:
+                raise RuntimeError("No chunks were successfully processed")
+
             try:
-                chunk = prefill_ids[:, i:i + CHUNK_SIZE]
-                
-                if chunk.shape[1] == 0:
-                    raise ValueError(f"Empty chunk encountered at position {i}")
-                
-                # Log memory usage for monitoring
-                current_mem = torch.cuda.memory_allocated(device) / 1024**2
-                max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
-                print(f"Memory usage before chunk {i//CHUNK_SIZE + 1}: {current_mem:.2f}MB / {max_mem:.2f}MB")
-                
-                # Generate with the current chunk
-                outputs = model(
-                    input_ids=chunk,
+                generation_output = model.generate(
+                    input_ids=next_token,
                     past_key_values=past_key_values,
-                    use_cache=True,
-                    return_dict=True
+                    max_length=answer_ids.shape[-1],
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
                 )
                 
-                if not hasattr(outputs, 'past_key_values') or outputs.past_key_values is None:
-                    raise ValueError("Model failed to return past key values")
+                if generation_output.shape[0] == 0:
+                    raise ValueError("Generation produced empty output")
+                    
+                model_output = tokenizer.decode(generation_output[0].cpu())
                 
-                # Update past_key_values for next iteration
-                past_key_values = outputs.past_key_values
-                last_chunk_start = i + chunk.shape[1]
-                chunks_processed += 1
+                # Find the number after "The pass key is"
+                matches = re.findall(r"What is the pass key\? The pass key is (\d+)", model_output)
+                if matches:
+                    model_answer = matches[0]  # Take the first match
+                else:
+                    model_answer = ""
+                    print("Warning: Could not find pass key in model output")
                 
-            except RuntimeError as e:
-                if "out of memory" in str(e):
-                    torch.cuda.empty_cache()
-                    raise RuntimeError(f"GPU OOM at chunk {i//CHUNK_SIZE + 1}.")
-                raise e
+                is_correct = (model_answer == answer)
+                print(f"Found answer: {model_answer}")
+                print(f"Correct answer: {answer}")
+                print(f"Is correct: {is_correct}\n")
                 
-        if chunks_processed == 0:
-            raise RuntimeError("No chunks were successfully processed")
-
-        try:
-            generation_output = model.generate(
-                input_ids=next_token,
-                past_key_values=past_key_values,
-                max_length=answer_ids.shape[-1],
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-            )
-            
-            if generation_output.shape[0] == 0:
-                raise ValueError("Generation produced empty output")
+                return is_correct, len_token
                 
-            model_output = tokenizer.decode(generation_output[0].cpu())
-            
-            # Find the number after "The pass key is"
-            matches = re.findall(r"What is the pass key\? The pass key is (\d+)", model_output)
-            if matches:
-                model_answer = matches[0]  # Take the first match
-            else:
-                model_answer = ""
-                print("Warning: Could not find pass key in model output")
-            
-            is_correct = (model_answer == answer)
-            print(f"Found answer: {model_answer}")
-            print(f"Correct answer: {answer}")
-            print(f"Is correct: {is_correct}\n")
-            
-            return is_correct, len_token
-            
-        except Exception as e:
-            print(f"Error during generation or post-processing: {str(e)}")
-            raise
-            
+            except Exception as e:
+                print(f"Error during generation or post-processing: {str(e)}")
+                raise
+                
     except Exception as e:
         print(f"Fatal error in passkey retrieval test: {str(e)}")
         # Return a failed test result rather than crashing
         return False, 0
-  
+
 def main(args):
     device = "cuda:0"
     torch.cuda.set_device(device)
@@ -176,44 +175,46 @@ def main(args):
     # Load model and tokenizer
     model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True)
     model = model.to('cuda')
+    model.eval()  # Added model.eval()
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
     # Calculate number of test points starting from min_tokens
     total_test_points = (args.max_tokens - args.min_tokens) // args.interval + 1
     all_accuracies = []
     
-    for i in range(total_test_points):
-        # Calculate context length starting from min_tokens
-        current_tokens = args.min_tokens + (i * args.interval)
-        # Adjust the garbage text calculation to match the new token length
-        n_garbage = int(3.75 * current_tokens // 1024 * 1024)
-        
-        # Calculate depth steps starting from min_depth
-        depth_steps = np.linspace(args.min_depth, 1.0, 10)
-        
-        for depth in depth_steps:
-            n_garbage_prefix = int(n_garbage * depth)
-            passed_tests = 0
-            total_tokens = 0
+    with torch.no_grad():  # Added no_grad context for the entire evaluation loop
+        for i in range(total_test_points):
+            # Calculate context length starting from min_tokens
+            current_tokens = args.min_tokens + (i * args.interval)
+            # Adjust the garbage text calculation to match the new token length
+            n_garbage = int(3.75 * current_tokens // 1024 * 1024)
             
-            for k in range(args.num_tests):
-                is_correct, len_tokens = passkey_retrieval_test(
-                    model, tokenizer, device, n_garbage_prefix, 
-                    n_garbage=n_garbage, seed=k
-                )
-                passed_tests += is_correct
-                total_tokens += len_tokens
+            # Calculate depth steps starting from min_depth
+            depth_steps = np.linspace(args.min_depth, 1.0, 10)
+            
+            for depth in depth_steps:
+                n_garbage_prefix = int(n_garbage * depth)
+                passed_tests = 0
+                total_tokens = 0
                 
-            avg_tokens = total_tokens // args.num_tests
-            accuracy = float(passed_tests) / args.num_tests
-            print(f"accuracy on the token length {avg_tokens}, depth {depth:.2f}, is {accuracy:.2f}")
-            
-            result = {
-                "Context Length": avg_tokens,
-                "Document Depth": round(depth * 100, -1),
-                "Score": passed_tests
-            }
-            all_accuracies.append(result)
+                for k in range(args.num_tests):
+                    is_correct, len_tokens = passkey_retrieval_test(
+                        model, tokenizer, device, n_garbage_prefix, 
+                        n_garbage=n_garbage, seed=k
+                    )
+                    passed_tests += is_correct
+                    total_tokens += len_tokens
+                    
+                avg_tokens = total_tokens // args.num_tests
+                accuracy = float(passed_tests) / args.num_tests
+                print(f"accuracy on the token length {avg_tokens}, depth {depth:.2f}, is {accuracy:.2f}")
+                
+                result = {
+                    "Context Length": avg_tokens,
+                    "Document Depth": round(depth * 100, -1),
+                    "Score": passed_tests
+                }
+                all_accuracies.append(result)
 
     # Create visualization
     df = pd.DataFrame(all_accuracies)
