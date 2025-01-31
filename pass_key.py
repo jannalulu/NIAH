@@ -25,8 +25,8 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=22179, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=24385, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=21179, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=23779, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
     parser.add_argument('--min_depth', type=float, default=0.3, help='minimum depth ratio to start testing')
@@ -69,11 +69,12 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
     print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
 
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
-    generation_output = model.generate(
-        input_ids=input_ids,
-        max_length=answer_ids.shape[-1] + input_ids.shape[-1],
-        use_cache=True
-    )
+    with torch.no_grad():
+        generation_output = model.generate(
+            input_ids=input_ids,
+            max_length=answer_ids.shape[-1] + input_ids.shape[-1],
+            use_cache=True
+        )
     
     model_output = tokenizer.decode(generation_output[0].cpu())
     
@@ -102,6 +103,8 @@ def main(args):
     model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True)
     model = model.to('cuda')
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
+
+    model.eval()
 
     # Calculate number of test points starting from min_tokens
     total_test_points = (args.max_tokens - args.min_tokens) // args.interval + 1
