@@ -24,9 +24,9 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=23992, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
-    parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=14000, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=23992, help='maximum token length for evaluation')
+    parser.add_argument('--interval', type=int, default=1024, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
     parser.add_argument('--min_depth', type=float, default=0.3, help='minimum depth ratio to start testing')
 
@@ -41,7 +41,7 @@ def generate_prompt_landmark(n_garbage, seed, n_garbage_prefix):
 
     task_description = (
         "There is an important info hidden inside a lot of irrelevant text. "
-        "Find it and memorize them. I will quiz you about the important information there."
+        "Find it and memorize it. I will quiz you about the important information there."
     )
     garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again."
     garbage_inf = " ".join([garbage] * 5000)
