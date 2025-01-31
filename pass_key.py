@@ -5,6 +5,7 @@ import torch
 import re
 import argparse
 import random
+import re
 import numpy as np
 from numpy import random
 from tqdm import tqdm
@@ -16,15 +17,11 @@ import seaborn as sns
 
 model_path = "../rwkv7-1.5B-world3-32k/snapshots/848422f82e020c2b6c4deb43029afd62dc102e23"
 
-def get_gpu_memory():
-    """Returns the current GPU memory usage in MB."""
-    torch.cuda.synchronize()
-    return torch.cuda.memory_allocated() / 1024 / 1024
-
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
+
     parser.add_argument('--min_tokens', type=int, default=21179, help='minimum token length to start evaluation')
     parser.add_argument('--max_tokens', type=int, default=23779, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
@@ -69,6 +66,7 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
     print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
 
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
+    
     with torch.no_grad():
         generation_output = model.generate(
             input_ids=input_ids,
@@ -142,6 +140,20 @@ def main(args):
                 "Score": passed_tests
             }
             all_accuracies.append(result)
+
+    total_tests = len(all_accuracies)
+    total_passed = sum(result['Score'] for result in all_accuracies)
+    total_score = (total_passed / (total_tests * args.num_tests)) * 100
+
+    print("\nFinal Results Summary:")
+    print(f"Total Tests Run: {total_tests * args.num_tests}")
+    print(f"Total Tests Passed: {total_passed}")
+    print(f"Overall Score: {total_score:.2f}%")
+
+    # Print detailed breakdown
+    df_summary = pd.DataFrame(all_accuracies)
+    print("\nDetailed Results by Context Length and Depth:")
+    print(df_summary.groupby(['Context Length', 'Document Depth'])['Score'].mean().to_string())
 
     # Create visualization
     df = pd.DataFrame(all_accuracies)
