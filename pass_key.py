@@ -13,12 +13,14 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 
+model_path = "../rwkv7-1.5B-world3-32k/snapshots/848422f82e020c2b6c4deb43029afd62dc102e23"
+
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
     parser.add_argument('--min_tokens', type=int, default=8192, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=16385, help='maximum token length for evaluation')
+    parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
     parser.add_argument('--min_depth', type=float, default=0.3, help='minimum depth ratio to start testing')
@@ -61,7 +63,8 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
     generation_output = model.generate(
         input_ids=input_ids,
-        max_length=answer_ids.shape[-1] + input_ids.shape[-1]
+        max_length=answer_ids.shape[-1] + input_ids.shape[-1],
+        use_cache=True
     )
     model_output = tokenizer.decode(generation_output[0].cpu())
     
@@ -88,7 +91,7 @@ def main(args):
     print("base model", args.base_model)
 
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True)
     model = model.to('cuda')
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
@@ -128,6 +131,20 @@ def main(args):
                 "Score": passed_tests
             }
             all_accuracies.append(result)
+
+    total_tests = len(all_accuracies)
+    total_passed = sum(result['Score'] for result in all_accuracies)
+    total_score = (total_passed / (total_tests * args.num_tests)) * 100
+
+    print("\nFinal Results Summary:")
+    print(f"Total Tests Run: {total_tests * args.num_tests}")
+    print(f"Total Tests Passed: {total_passed}")
+    print(f"Overall Score: {total_score:.2f}%")
+
+    # Print detailed breakdown
+    df_summary = pd.DataFrame(all_accuracies)
+    print("\nDetailed Results by Context Length and Depth:")
+    print(df_summary.groupby(['Context Length', 'Document Depth'])['Score'].mean().to_string())
 
     # Create visualization
     df = pd.DataFrame(all_accuracies)
