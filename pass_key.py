@@ -4,6 +4,7 @@ import math
 import torch
 import argparse
 import random
+import re
 import numpy as np
 from numpy import random
 from tqdm import tqdm
@@ -19,7 +20,7 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=8192, help='minimum token length to start evaluation')
+    parser.add_argument('--min_tokens', type=int, default=20192, help='minimum token length to start evaluation')
     parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
@@ -61,15 +62,46 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
     len_token = input_ids.shape[-1]
 
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
+    
+    CHUNK_SIZE = 4096
+    prefill_ids = input_ids[:, :-1]  # all tokens except last
+    next_token = input_ids[:, -1:]   # last token
+    past_key_values = None
+    last_chunk_start = 0
+
+    # Process chunks sequentially
+    for i in range(0, prefill_ids.shape[1], CHUNK_SIZE):
+        chunk = prefill_ids[:, i:i + CHUNK_SIZE]
+        
+        # Generate with the current chunk
+        outputs = model(
+            input_ids=chunk,
+            past_key_values=past_key_values,
+            use_cache=True,
+            return_dict=True
+        )
+        
+        # Update past_key_values for next iteration
+        past_key_values = outputs.past_key_values
+        last_chunk_start = i + chunk.shape[1]
+
+        allocated = torch.cuda.memory_allocated(device) / 1024**2  # Convert to MB
+        max_allocated = torch.cuda.max_memory_allocated(device) / 1024**2  # Convert to MB
+        print(f"Chunk {i//CHUNK_SIZE + 1}: Current VRAM {allocated:.2f}MB, Peak VRAM {max_allocated:.2f}MB")
+
+    # Final generation with the last token
     generation_output = model.generate(
-        input_ids=input_ids,
-        max_length=answer_ids.shape[-1] + input_ids.shape[-1],
+        input_ids=next_token,
+        past_key_values=past_key_values,
+        max_new_tokens=answer_ids.shape[-1],
+        pad_token_id=tokenizer.pad_token_id,
+        eos_token_id=tokenizer.eos_token_id,
         use_cache=True
     )
+    
     model_output = tokenizer.decode(generation_output[0].cpu())
     
     # Find the number after "The pass key is"
-    import re
     matches = re.findall(r"What is the pass key\? The pass key is (\d+)", model_output)
     if matches:
         model_answer = matches[0]  # Take the first match
