@@ -2,6 +2,7 @@
 import os
 import math
 import torch
+import re
 import argparse
 import random
 import numpy as np
@@ -13,12 +14,19 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 
+model_path = "../rwkv7-1.5B-world3-32k/snapshots/848422f82e020c2b6c4deb43029afd62dc102e23"
+
+def get_gpu_memory():
+    """Returns the current GPU memory usage in MB."""
+    torch.cuda.synchronize()
+    return torch.cuda.memory_allocated() / 1024 / 1024
+
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=8192, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=16385, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=22179, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=24385, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
     parser.add_argument('--min_depth', type=float, default=0.3, help='minimum depth ratio to start testing')
@@ -58,15 +66,18 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
     input_ids = input_ids.to(device)
     len_token = input_ids.shape[-1]
 
+    print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
+
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
     generation_output = model.generate(
         input_ids=input_ids,
-        max_length=answer_ids.shape[-1] + input_ids.shape[-1]
+        max_length=answer_ids.shape[-1] + input_ids.shape[-1],
+        use_cache=True
     )
+    
     model_output = tokenizer.decode(generation_output[0].cpu())
     
     # Find the number after "The pass key is"
-    import re
     matches = re.findall(r"What is the pass key\? The pass key is (\d+)", model_output)
     if matches:
         model_answer = matches[0]  # Take the first match
@@ -88,7 +99,7 @@ def main(args):
     print("base model", args.base_model)
 
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True)
     model = model.to('cuda')
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
