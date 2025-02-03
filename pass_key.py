@@ -27,8 +27,8 @@ def parse_config():
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
 
-    parser.add_argument('--min_tokens', type=int, default=24000, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=27000, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=30000, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
     parser.add_argument('--min_depth', type=float, default=0.3, help='minimum depth ratio to start testing')
@@ -87,12 +87,12 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
             max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
             print(f"Memory usage before chunk {i//CHUNK_SIZE + 1}: {current_mem:.2f}MB / {max_mem:.2f}MB")
 
-            past_key_values = outputs.past_key_values #if hasattr(outputs, 'state') else outputs[-1]
+            past_key_values = outputs.past_key_values
 
         generation_output = model.generate(
             input_ids=input_ids[:, -1:],
             past_key_values=past_key_values,
-            max_length=answer_ids.shape[-1],
+            max_length=answer_ids.shape[-1] + 16,
             use_cache=True,
         )
         current_mem = torch.cuda.memory_allocated(device) / 1024**2
@@ -102,7 +102,7 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
     model_output = tokenizer.decode(generation_output[0].cpu())
     
     # Find the number after "The pass key is"
-    matches = re.findall(r"What is the pass key\? The pass key is (\d+)", model_output)
+    matches = re.findall(r"is (\d+)", model_output)
     if matches:
         model_answer = matches[0]  # Take the first match
     else:
