@@ -1,6 +1,7 @@
 
 import os
 import math
+import fla
 import torch
 import re
 import argparse
@@ -27,7 +28,7 @@ def parse_config():
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
 
-    parser.add_argument('--min_tokens', type=int, default=65000, help='minimum token length to start evaluation')
+    parser.add_argument('--min_tokens', type=int, default=12288, help='minimum token length to start evaluation')
     parser.add_argument('--max_tokens', type=int, default=65536, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
@@ -124,7 +125,7 @@ def main(args):
     print("base model", args.base_model)
 
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained('m8than/rwkv7-1b5-128k', trust_remote_code=True)
     model = model.to('cuda')
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
@@ -206,7 +207,7 @@ def main(args):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"data/heatmap_{args.max_tokens}.png")
+    plt.savefig(f"data/heatmap_{args.max_tokens}_rwkv1b5_128k.png")
 
 if __name__ == "__main__":
     args = parse_config()
