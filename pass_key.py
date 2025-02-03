@@ -27,8 +27,8 @@ def parse_config():
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
 
-    parser.add_argument('--min_tokens', type=int, default=30000, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=65000, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=65536, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
     parser.add_argument('--min_depth', type=float, default=0.3, help='minimum depth ratio to start testing')
