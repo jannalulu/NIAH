@@ -28,9 +28,8 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-
     parser.add_argument('--min_tokens', type=int, default=16384, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
+    parser.add_argument('--max_tokens', type=int, default=24567, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
     parser.add_argument('--min_depth', type=float, default=0.3, help='minimum depth ratio to start testing')
@@ -74,26 +73,15 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
 
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
     
-    CHUNK_SIZE = 1024
-    past_key_values = None
-    chunk_input_ids = input_ids[:, :-1]
     with torch.no_grad():
-        # Process all tokens in chunks
-        for i in range(0, chunk_input_ids.shape[1], CHUNK_SIZE):
-            chunk = chunk_input_ids[:, i:i + CHUNK_SIZE]
-            outputs = model(
-                chunk,
-                past_key_values=past_key_values,
-            )
-            current_mem = torch.cuda.memory_allocated(device) / 1024**2
-            max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
-            print(f"Memory usage before chunk {i//CHUNK_SIZE + 1}: {current_mem:.2f}MB / {max_mem:.2f}MB")
+        outputs = model(input_ids[:, :-1])
+        current_mem = torch.cuda.memory_allocated(device) / 1024**2
+        max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
+        print(f"Memory usage after context processing: {current_mem:.2f}MB / {max_mem:.2f}MB")
 
-            past_key_values = outputs.past_key_values
-
+        # Generate the answer
         generation_output = model.generate(
             input_ids=input_ids[:, -1:],
-            past_key_values=past_key_values,
             max_length=answer_ids.shape[-1] + 16,
             use_cache=True,
         )
@@ -126,7 +114,7 @@ def main(args):
     print("base model", args.base_model)
 
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained(model_path_0, trust_remote_code=True, tmix_backend="cuda")
+    model = AutoModelForCausalLM.from_pretrained(model_path_1, trust_remote_code=True, tmix_backend="fla")
     model = model.to('cuda')
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
@@ -208,7 +196,7 @@ def main(args):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"data/heatmap_{args.max_tokens}_rwkv7_1b5_64k.png")
+    plt.savefig(f"data/heatmap_{args.max_tokens}_rwkv7_chk1.png")
 
 if __name__ == "__main__":
     args = parse_config()
