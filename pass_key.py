@@ -18,6 +18,9 @@ import seaborn as sns
 
 model_path_0 = "/workspace/RWKV-block/test/v7_goose/.hf_build/rwkv-0/"
 model_path_1 = "/workspace/RWKV-block/test/v7_goose/.hf_build/rwkv-1/"
+model_path_5 = "/workspace/RWKV-block/test/v7_goose/.hf_build/rwkv-5/"
+model_path_10 = "/workspace/RWKV-block/test/v7_goose/.hf_build/rwkv-10/"
+model_path_base = "/workspace/RWKV-block/test/v7_goose/.hf_build/v7-1B4/"
 
 def get_gpu_memory():
     """Returns the current GPU memory usage in MB."""
@@ -81,8 +84,8 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
 
         # Generate the answer
         generation_output = model.generate(
-            input_ids=input_ids[:, -1:],
-            max_length=answer_ids.shape[-1] + 16,
+            input_ids=input_ids,
+            max_new_tokens=answer_ids.shape[-1] + 16,
             use_cache=True,
         )
         current_mem = torch.cuda.memory_allocated(device) / 1024**2
