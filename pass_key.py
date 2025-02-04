@@ -31,8 +31,8 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=16384, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=24567, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=28914, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=37000, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
     parser.add_argument('--min_depth', type=float, default=0.3, help='minimum depth ratio to start testing')
@@ -75,7 +75,7 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
     print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
 
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
-    
+
     with torch.no_grad():
         outputs = model(input_ids[:, :-1])
         current_mem = torch.cuda.memory_allocated(device) / 1024**2
@@ -117,7 +117,7 @@ def main(args):
     print("base model", args.base_model)
 
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained(model_path_1, trust_remote_code=True, tmix_backend="fla")
+    model = AutoModelForCausalLM.from_pretrained(model_path_0, trust_remote_code=True, tmix_backend="fla")
     model = model.to('cuda')
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
@@ -199,7 +199,7 @@ def main(args):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"data/heatmap_{args.max_tokens}_rwkv7_chk1.png")
+    plt.savefig(f"data/heatmap_{args.max_tokens}_rwkv7_chk0.png")
 
 if __name__ == "__main__":
     args = parse_config()
