@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 
-model_path = "../rwkv7-1.5B-world3-32k/snapshots/848422f82e020c2b6c4deb43029afd62dc102e23"
+model_path = "../.cache/huggingface/hub/rwkv7-1.5B-world-smerky-ft/snapshots/848422f82e020c2b6c4deb43029afd62dc102e23"
 
 def get_gpu_memory():
     """Returns the current GPU memory usage in MB."""
@@ -28,8 +28,8 @@ def parse_config():
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
 
-    parser.add_argument('--min_tokens', type=int, default=12288, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=65536, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=16384, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
     parser.add_argument('--min_depth', type=float, default=0.3, help='minimum depth ratio to start testing')
@@ -125,7 +125,7 @@ def main(args):
     print("base model", args.base_model)
 
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained('m8than/rwkv7-1b5-128k', trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True)
     model = model.to('cuda')
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
@@ -207,7 +207,7 @@ def main(args):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"data/heatmap_{args.max_tokens}_rwkv1b5_128k.png")
+    plt.savefig(f"data/heatmap_{args.max_tokens}_rwkv7_1b5_smerkyft.png")
 
 if __name__ == "__main__":
     args = parse_config()
