@@ -2,6 +2,7 @@
 import os
 import math
 import fla
+from transformers import GenerationConfig
 import torch
 import re
 import argparse
@@ -95,6 +96,7 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
             past_key_values=past_key_values,
             max_length=answer_ids.shape[-1] + 16,
             use_cache=True,
+            generation_config=GenerationConfig(do_sample=False, use_cache=True),
         )
         current_mem = torch.cuda.memory_allocated(device) / 1024**2
         max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
