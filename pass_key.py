@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 
-model_path = "../.cache/huggingface/hub/rwkv7-1.5B-world-smerky-ft/snapshots/848422f82e020c2b6c4deb43029afd62dc102e23"
+model_path = "../v7-1B4/"
 
 def get_gpu_memory():
     """Returns the current GPU memory usage in MB."""
@@ -28,11 +28,11 @@ def parse_config():
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
 
-    parser.add_argument('--min_tokens', type=int, default=16384, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=65536, help='maximum token length for evaluation')
-    parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
-    parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
-    parser.add_argument('--min_depth', type=float, default=0.3, help='minimum depth ratio to start testing')
+    parser.add_argument('--min_tokens', type=int, default=14384, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=16384, help='maximum token length for evaluation')
+    parser.add_argument('--interval', type=int, default=1024, help='interval for evaluation')
+    parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
+    parser.add_argument('--min_depth', type=float, default=0.2, help='minimum depth ratio to start testing')
 
     args = parser.parse_args()
     return args
@@ -73,7 +73,7 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
 
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
     
-    CHUNK_SIZE = 1024
+    CHUNK_SIZE = 2048
     past_key_values = None
     chunk_input_ids = input_ids[:, :-1]
     with torch.no_grad():
@@ -125,7 +125,7 @@ def main(args):
     print("base model", args.base_model)
 
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained('m8than/rwkv7-1b5-64k', trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True, tmix_backend="cuda")
     model = model.to('cuda')
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
