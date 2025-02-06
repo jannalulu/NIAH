@@ -39,40 +39,51 @@ def parse_config():
     return args
 
 
-def generate_prompt_landmark(n_garbage, seed, n_garbage_prefix):
-    """Generates a text file and inserts a passkey at a random position."""
+def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_context_length_buffer=250):
+    needle = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key."
+    task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there."
+    garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again. "
+    context = garbage * 1000  # This gives us plenty of context to work with
+    
+    tokens_needle = tokenizer.encode(needle + str(pass_key))
+    tokens_context = tokenizer.encode(context)
+    
+    # Reduce context length by buffer
+    context_length -= final_context_length_buffer
+    
+    # Truncate context if needed
+    if len(tokens_context) + len(tokens_needle) > context_length:
+        tokens_context = tokens_context[:context_length - len(tokens_needle)]
+    
+    if depth >= 1:
+        tokens_new_context = tokens_context + tokens_needle
+    else:
+        insertion_point = int(len(tokens_context) * depth)
+        tokens_new_context = tokens_context[:insertion_point]
+        
+        # Find sentence break
+        period_tokens = tokenizer.encode('.')
+        while tokens_new_context and tokens_new_context[-1] not in period_tokens:
+            insertion_point -= 1
+            tokens_new_context = tokens_context[:insertion_point]
+        
+        tokens_new_context += tokenizer.encode("\n") + tokens_needle + tokenizer.encode("\n") + tokens_context[insertion_point:]
+    
+    print("Total Tokens in Context: ", len(tokens_new_context))
+    new_context = tokenizer.decode(tokens_new_context)
+    return new_context + "What is the pass key? The pass key is"
+
+def passkey_retrieval_test(model, tokenizer, device, context_length, depth, n_garbage=60000, seed=666):
+    # Generate random pass key
     rnd_state = random.get_state()
     random.seed(seed)
-    n_garbage_suffix = n_garbage - n_garbage_prefix
-
-    task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there."
-    garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again."
-    garbage_inf = " ".join([garbage] * 5000)
-    assert len(garbage_inf) >= n_garbage
-    
-    # Take slices of raw garbage text
-    raw_prefix = garbage_inf[:n_garbage_prefix]
-    raw_suffix = garbage_inf[:n_garbage_suffix]
-
-    # Wrap each complete chunk in backticks
-    garbage_prefix = f"```{raw_prefix}```"
-    garbage_suffix = f"```{raw_suffix}```"
-
     pass_key = random.randint(1, 50000)
-    information_line = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key."
-    final_question = "What is the pass key? The pass key is"
-    lines = [
-        task_description,
-        garbage_prefix,
-        information_line,
-        garbage_suffix,
-        final_question,
-    ]
     random.set_state(rnd_state)
-    return "\n".join(lines), str(pass_key)
-
-def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage=60000, seed=666):
-    prompt, answer = generate_prompt_landmark(n_garbage, seed, n_garbage_prefix)
+    
+    prompt = generate_prompt_landmark(tokenizer, pass_key, context_length=context_length, depth=depth)
+    answer = str(pass_key)
+    
+    # Rest of the function remains the same
     input_ids = tokenizer(prompt, return_tensors="pt").input_ids
     input_ids = input_ids.to(device)
     len_token = input_ids.shape[-1]
@@ -119,6 +130,7 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
         model_answer = ""
     
     is_correct = (model_answer == answer)
+    print(prompt)
     print(f"Model's output: {model_output}")
     print(f"Found answer: {model_answer}")
     print(f"Correct answer: {answer}")
@@ -147,21 +159,20 @@ def main(args):
     for i in range(total_test_points):
         # Calculate context length starting from min_tokens
         current_tokens = args.min_tokens + (i * args.interval)
-        # Adjust the garbage text calculation to match the new token length
-        n_garbage = int(3.75 * current_tokens // 1024 * 1024)
         
         # Calculate depth steps starting from min_depth
         depth_steps = np.linspace(args.min_depth, 1.0, 10)
         
         for depth in depth_steps:
-            n_garbage_prefix = int(n_garbage * depth)
             passed_tests = 0
             total_tokens = 0
             
             for k in range(args.num_tests):
                 is_correct, len_tokens = passkey_retrieval_test(
-                    model, tokenizer, device, n_garbage_prefix, 
-                    n_garbage=n_garbage, seed=k
+                    model, tokenizer, device, 
+                    context_length=current_tokens,
+                    depth=depth,
+                    seed=k
                 )
                 passed_tests += is_correct
                 total_tokens += len_tokens
