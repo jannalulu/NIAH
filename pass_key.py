@@ -29,7 +29,7 @@ def parse_config():
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
 
-    parser.add_argument('--min_tokens', type=int, default=25045, help='minimum token length to start evaluation')
+    parser.add_argument('--min_tokens', type=int, default=16387, help='minimum token length to start evaluation')
     parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=1024, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
@@ -49,8 +49,15 @@ def generate_prompt_landmark(n_garbage, seed, n_garbage_prefix):
     garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again."
     garbage_inf = " ".join([garbage] * 5000)
     assert len(garbage_inf) >= n_garbage
-    garbage_prefix = garbage_inf[:n_garbage_prefix]
-    garbage_suffix = garbage_inf[:n_garbage_suffix]
+    
+    # Take slices of raw garbage text
+    raw_prefix = garbage_inf[:n_garbage_prefix]
+    raw_suffix = garbage_inf[:n_garbage_suffix]
+
+    # Wrap each complete chunk in backticks
+    garbage_prefix = f"```{raw_prefix}```"
+    garbage_suffix = f"```{raw_suffix}```"
+
     pass_key = random.randint(1, 50000)
     information_line = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key."
     final_question = "What is the pass key? The pass key is"
@@ -209,7 +216,7 @@ def main(args):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"data/heatmap_{args.max_tokens}_rwkv7_1b5_base_QHQ_ideal.png")
+    plt.savefig(f"data/heatmap_{args.max_tokens}_rwkv7_1b5_base_ideal.png")
 
 if __name__ == "__main__":
     args = parse_config()
