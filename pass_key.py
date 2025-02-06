@@ -45,16 +45,15 @@ def generate_prompt_landmark(n_garbage, seed, n_garbage_prefix):
     random.seed(seed)
     n_garbage_suffix = n_garbage - n_garbage_prefix
 
-    # task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there."
-    task_description = "```I will ask you about a passkey. The passkey will appear in the following format '```The pass key is {pass_key}. Remember it. {pass_key} is the pass key.``` Please remember it.```'"
-    garbage = "```The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.```"
+    task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there."
+    garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again."
     garbage_inf = " ".join([garbage] * 5000)
     assert len(garbage_inf) >= n_garbage
     garbage_prefix = garbage_inf[:n_garbage_prefix]
     garbage_suffix = garbage_inf[:n_garbage_suffix]
     pass_key = random.randint(1, 50000)
-    information_line = f"```The pass key is {pass_key}. Remember it. {pass_key} is the pass key.```"
-    final_question = "```What is the pass key? The pass key is"
+    information_line = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key."
+    final_question = "What is the pass key? The pass key is"
     lines = [
         task_description,
         garbage_prefix,
