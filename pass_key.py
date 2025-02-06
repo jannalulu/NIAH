@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 
-model_path_0 = "/workspace/RWKV-block/test/v7_goose/.hf_build/rwkv-0/"
+model_path_0 = "../rwkv-0" # "/workspace/RWKV-block/test/v7_goose/.hf_build/rwkv-0/"
 model_path_1 = "/workspace/RWKV-block/test/v7_goose/.hf_build/rwkv-1/"
 model_path_5 = "/workspace/RWKV-block/test/v7_goose/.hf_build/rwkv-5/"
 model_path_10 = "/workspace/RWKV-block/test/v7_goose/.hf_build/rwkv-10/"
@@ -31,8 +31,8 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=35000, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=45000, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=50000, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=65000, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
     parser.add_argument('--min_depth', type=float, default=0.3, help='minimum depth ratio to start testing')
@@ -47,12 +47,16 @@ def generate_prompt_landmark(n_garbage, seed, n_garbage_prefix):
     random.seed(seed)
     n_garbage_suffix = n_garbage - n_garbage_prefix
 
-    task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there."
-    garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again."
+    # task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there."
+    task_description = "I will ask you about a passkey. The passkey will appear in the following format 'The pass key is {pass_key}. Remember it. {pass_key} is the pass key. Please remember it.'"
+    # garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again."
+    garbage = "```The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.```"
     garbage_inf = " ".join([garbage] * 5000)
     assert len(garbage_inf) >= n_garbage
-    garbage_prefix = garbage_inf[:n_garbage_prefix]
-    garbage_suffix = garbage_inf[:n_garbage_suffix]
+
+    garbage_prefix = f"```{garbage_inf[:n_garbage_prefix]}```"
+    garbage_suffix = f"```{garbage_inf[:n_garbage_suffix]}```"
+
     pass_key = random.randint(1, 50000)
     information_line = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key."
     final_question = "What is the pass key? The pass key is"
@@ -199,7 +203,7 @@ def main(args):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"data/heatmap_{args.max_tokens}_rwkv7_chk0.png")
+    plt.savefig(f"data/heatmap_{args.max_tokens}_rwkv7_chk0_QhQ_ideal.png")
 
 if __name__ == "__main__":
     args = parse_config()
