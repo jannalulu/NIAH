@@ -40,13 +40,13 @@ def parse_config():
 
 
 def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_context_length_buffer=250):
-    needle = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key."
-    task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there."
+    needle = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key. "
+    task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there. "
     garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again. "
-    context = garbage * 1000  # This gives us plenty of context to work with
+    context = garbage * 1000
     
-    tokens_needle = tokenizer.encode(needle + str(pass_key))
-    tokens_context = tokenizer.encode(context)
+    tokens_needle = tokenizer.encode(needle)
+    tokens_context = tokenizer.encode(task_description + context)
     
     # Reduce context length by buffer
     context_length -= final_context_length_buffer
@@ -71,7 +71,7 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
     
     print("Total Tokens in Context: ", len(tokens_new_context))
     new_context = tokenizer.decode(tokens_new_context)
-    return new_context + "What is the pass key? The pass key is"
+    return new_context + "\n What is the pass key? The pass key is"
 
 def passkey_retrieval_test(model, tokenizer, device, context_length, depth, n_garbage=60000, seed=666):
     # Generate random pass key
@@ -227,7 +227,7 @@ def main(args):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"data/heatmap_{args.max_tokens}_rwkv7_1b5_base_ideal.png")
+    plt.savefig(f"data/heatmap_counted_{args.max_tokens}_rwkv7_1b5_base_ideal.png")
 
 if __name__ == "__main__":
     args = parse_config()
