@@ -43,20 +43,26 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
     needle = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key. "
     task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there. "
     garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again. "
-    context = garbage * 1000
+    question = "What is the pass key? The pass key is"
+    
+    tokens_in_garbage = len(tokenizer.encode(garbage))
+    multiplier = math.ceil((context_length - len(tokenizer.encode(task_description)) - 25) / tokens_in_garbage)
+    context = garbage * multiplier
     
     tokens_needle = tokenizer.encode(needle)
     tokens_context = tokenizer.encode(task_description + context)
+    tokens_question = tokenizer.encode(question)
     
     # Reduce context length by buffer
-    context_length -= final_context_length_buffer
+    context_length = context_length - final_context_length_buffer - len(tokens_question)
     
     # Truncate context if needed
-    if len(tokens_context) + len(tokens_needle) > context_length:
+    if len(tokens_context) + len(tokens_needle) + len(question)> context_length:
         tokens_context = tokens_context[:context_length - len(tokens_needle)]
     
     if depth >= 1:
         tokens_new_context = tokens_context + tokens_needle
+
     else:
         insertion_point = int(len(tokens_context) * depth)
         tokens_new_context = tokens_context[:insertion_point]
@@ -67,11 +73,11 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
             insertion_point -= 1
             tokens_new_context = tokens_context[:insertion_point]
         
-        tokens_new_context += tokenizer.encode("\n") + tokens_needle + tokenizer.encode("\n") + tokens_context[insertion_point:]
+        tokens_new_context += tokenizer.encode("\n") + tokens_needle + tokenizer.encode("\n") + tokens_context[insertion_point:] + tokenizer.encode("\n") + tokens_question
     
     print("Total Tokens in Context: ", len(tokens_new_context))
     new_context = tokenizer.decode(tokens_new_context)
-    return new_context + "\n What is the pass key? The pass key is"
+    return new_context
 
 def passkey_retrieval_test(model, tokenizer, device, context_length, depth, n_garbage=60000, seed=666):
     # Generate random pass key
