@@ -78,7 +78,7 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
     new_context = tokenizer.decode(tokens_new_context)
     return new_context
 
-def passkey_retrieval_test(model, tokenizer, device, context_length, depth, n_garbage=60000, seed=666):
+def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed=666):
     # Generate random pass key
     rnd_state = random.get_state()
     random.seed(seed)
