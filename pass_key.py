@@ -28,7 +28,6 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-
     parser.add_argument('--min_tokens', type=int, default=16387, help='minimum token length to start evaluation')
     parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=1024, help='interval for evaluation')
@@ -89,7 +88,6 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, n_ga
     prompt = generate_prompt_landmark(tokenizer, pass_key, context_length=context_length, depth=depth)
     answer = str(pass_key)
     
-    # Rest of the function remains the same
     input_ids = tokenizer(prompt, return_tensors="pt").input_ids
     input_ids = input_ids.to(device)
     len_token = input_ids.shape[-1]
