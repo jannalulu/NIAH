@@ -46,7 +46,7 @@ if __name__ == "__main__":
     
     # Example texts
     example_texts = [
-        "```The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.```"
+        "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again."
     ]
     # Garbage is 24 tokens (26 with backticks), task_description is 30 tokens, Needle is 17-19 tokens, question is 10 tokens. 
     # Garbage is 89 char (95 with backticks), task_description is 148 char, needle is 55-58 char, question is 37 char 
@@ -55,5 +55,5 @@ if __name__ == "__main__":
         count, tokens, ids = count_tokens(text, tokenizer)
         print(f"\nInput text: {text}")
         print(f"Token count: {count}")
-        print(f"Tokens: {tokens}")
-        print(f"Token IDs: {ids}")
+        # print(f"Tokens: {tokens}")
+        
