@@ -33,7 +33,7 @@ def parse_config():
     parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=1024, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
-    parser.add_argument('--min_depth', type=float, default=0.2, help='minimum depth ratio to start testing')
+    parser.add_argument('--max_depth', type=float, default=0.2, help='max depth ratio to test')
 
     args = parser.parse_args()
     return args
@@ -166,8 +166,8 @@ def main(args):
         # Calculate context length starting from min_tokens
         current_tokens = args.min_tokens + (i * args.interval)
         
-        # Calculate depth steps starting from min_depth
-        depth_steps = np.linspace(args.min_depth, 1.0, 10)
+        # Calculate depth steps to max_depth
+        depth_steps = np.linspace(0, args.max_depth, 10) # 10 steps from 0 to max_depth
         
         for depth in depth_steps:
             passed_tests = 0
