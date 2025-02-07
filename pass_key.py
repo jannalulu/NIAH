@@ -27,8 +27,8 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=16384, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=32768, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=45000, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=1024, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
     parser.add_argument('--max_depth', type=float, default=1.0, help='max depth ratio to test')
@@ -47,29 +47,34 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
     multiplier = math.ceil((context_length - len(tokenizer.encode(task_description)) - 25) / tokens_in_garbage)
     context = garbage * multiplier
     
+    tokens_task = tokenizer.encode(task_description)
     tokens_needle = tokenizer.encode(needle)
-    tokens_context = tokenizer.encode(task_description + context)
+    tokens_context = tokenizer.encode(context)
     tokens_question = tokenizer.encode(question)
     
     # Reduce context length by buffer
-    context_length = context_length - final_context_length_buffer - len(tokens_question)
+    context_length = context_length - final_context_length_buffer - len(tokens_task) - len(tokens_question)
     
     # Truncate context if needed
-    if len(tokens_context) + len(tokens_needle) + len(question)> context_length:
+    if len(tokens_context) + len(tokens_task) + len(tokens_needle) + len(question) > context_length:
         tokens_context = tokens_context[:context_length - len(tokens_needle)]
     
     if depth >= 1:
         tokens_new_context = tokens_context + tokenizer.encode("\n") + tokens_needle + tokenizer.encode("\n") + tokens_question
 
+    elif depth == 0: 
+        tokens_new_context = tokens_task + tokens_needle + tokenizer.encode("\n") + tokens_context + tokenizer.encode("\n") + tokens_question
+
     else:
-        insertion_point = int(len(tokens_context) * depth)
-        tokens_new_context = tokens_context[:insertion_point]
+        full_context = tokens_context + tokens_task
+        insertion_point = int(len(full_context) * depth)
+        tokens_new_context = full_context[:insertion_point]
         
         # Find sentence break
         period_tokens = tokenizer.encode('.')
         while tokens_new_context and tokens_new_context[-1] not in period_tokens:
             insertion_point -= 1
-            tokens_new_context = tokens_context[:insertion_point]
+            tokens_new_context = full_context[:insertion_point]
         
         tokens_new_context += tokenizer.encode("\n") + tokens_needle + tokenizer.encode("\n") + tokens_context[insertion_point:] + tokens_question
     
@@ -133,6 +138,7 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
         model_answer = ""
     
     is_correct = (model_answer == answer)
+    print(prompt)
     print(f"Model's output: {model_output}")
     print(f"Found answer: {model_answer}")
     print(f"Correct answer: {answer}")
@@ -229,7 +235,7 @@ def main(args):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"data/heatmap_counted_{args.max_tokens}_rwkv7_1b5_64k.png")
+    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_rwkv7_1b5_64k.png")
 
 if __name__ == "__main__":
     args = parse_config()
