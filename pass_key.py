@@ -27,8 +27,8 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=32768, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=45000, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=16384, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=1024, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
     parser.add_argument('--max_depth', type=float, default=1.0, help='max depth ratio to test')
@@ -60,23 +60,22 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
         tokens_context = tokens_context[:context_length - len(tokens_needle)]
     
     if depth >= 1:
-        tokens_new_context = tokens_context + tokenizer.encode("\n") + tokens_needle + tokenizer.encode("\n") + tokens_question
+        tokens_new_context = tokens_task + tokens_context + tokenizer.encode("\n") + tokens_needle + tokenizer.encode("\n") + tokens_question
 
     elif depth == 0: 
         tokens_new_context = tokens_task + tokens_needle + tokenizer.encode("\n") + tokens_context + tokenizer.encode("\n") + tokens_question
 
     else:
-        full_context = tokens_context + tokens_task
-        insertion_point = int(len(full_context) * depth)
-        tokens_new_context = full_context[:insertion_point]
+        insertion_point = int(len(tokens_context) * depth)
+        tokens_new_context = tokens_context[:insertion_point]
         
         # Find sentence break
         period_tokens = tokenizer.encode('.')
         while tokens_new_context and tokens_new_context[-1] not in period_tokens:
             insertion_point -= 1
-            tokens_new_context = full_context[:insertion_point]
+            tokens_new_context = tokens_context[:insertion_point]
         
-        tokens_new_context += tokenizer.encode("\n") + tokens_needle + tokenizer.encode("\n") + tokens_context[insertion_point:] + tokens_question
+        tokens_new_context = tokens_task + tokens_new_context + tokenizer.encode("\n") + tokens_needle + tokenizer.encode("\n") + tokens_context[insertion_point:] + tokens_question
     
     print("Total Tokens in Context: ", len(tokens_new_context))
     new_context = tokenizer.decode(tokens_new_context)
@@ -154,9 +153,9 @@ def main(args):
     print("base model", args.base_model)
 
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained('m8than/rwkv7-1b5-64k', trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained('fla-hub/rwkv7-2.9B-world', trust_remote_code=True)
     model = model.to('cuda')
-    tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-2.9B-world', trust_remote_code=True)
 
     model.eval()
 
@@ -235,7 +234,7 @@ def main(args):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_rwkv7_1b5_64k.png")
+    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_rwkv7_2b9_base.png")
 
 if __name__ == "__main__":
     args = parse_config()
