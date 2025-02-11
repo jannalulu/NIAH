@@ -137,7 +137,6 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
         model_answer = ""
     
     is_correct = (model_answer == answer)
-    print(prompt)
     print(f"Model's output: {model_output}")
     print(f"Found answer: {model_answer}")
     print(f"Correct answer: {answer}")
@@ -153,7 +152,7 @@ def main(args):
     print("base model", args.base_model)
 
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained('m8than/rwkv7-1b5-128k', trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
     model = model.to('cuda')
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
@@ -234,7 +233,7 @@ def main(args):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_rwkv7_1b5_64k.png")
+    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_rwkv7_1b5_base_fixed.png")
 
 if __name__ == "__main__":
     args = parse_config()
