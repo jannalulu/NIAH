@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 
-model_path = "../rwkv-0/"
+model_path = "/workspace/RWKV-block/test/v7_goose/.hf_build/v7-1B5-world/"
 
 def get_gpu_memory():
     """Returns the current GPU memory usage in MB."""
@@ -27,8 +27,8 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=32768, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=45000, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=16384, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=65538, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
     parser.add_argument('--max_depth', type=float, default=1.0, help='max depth ratio to test')
@@ -152,9 +152,9 @@ def main(args):
     print("base model", args.base_model)
 
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained('fla-hub/rwkv7-2.9B-world', trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained('m8than/rwkv7-1b5-128k', trust_remote_code=True)
     model = model.to('cuda')
-    tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-2.9B-world', trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
     model.eval()
 
