@@ -1,7 +1,7 @@
 accelerate
 datasets
 evaluate
-transformers>=4.36.2
+transformers>=4.48.0
 tqdm
 einops
 sentencepiece

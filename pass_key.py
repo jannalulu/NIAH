@@ -2,8 +2,8 @@
 import os
 import math
 import fla
+from transformers import GenerationConfig
 import torch
-import re
 import argparse
 import random
 import re
@@ -16,11 +16,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 
-model_path_0 = "../rwkv-0" # "/workspace/RWKV-block/test/v7_goose/.hf_build/rwkv-0/"
-model_path_1 = "/workspace/RWKV-block/test/v7_goose/.hf_build/rwkv-1/"
-model_path_5 = "/workspace/RWKV-block/test/v7_goose/.hf_build/rwkv-5/"
-model_path_10 = "/workspace/RWKV-block/test/v7_goose/.hf_build/rwkv-10/"
-model_path_base = "/workspace/RWKV-block/test/v7_goose/.hf_build/v7-1B4/"
+model_path = "/workspace/RWKV-block/test/v7_goose/.hf_build/v7-1B5-world/"
 
 def get_gpu_memory():
     """Returns the current GPU memory usage in MB."""
@@ -31,47 +27,70 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=50000, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=65000, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=16384, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=32784, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
-    parser.add_argument('--num_tests', type=int, default=3, help='number of repeat testing for each length')
-    parser.add_argument('--min_depth', type=float, default=0.3, help='minimum depth ratio to start testing')
+    parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
+    parser.add_argument('--max_depth', type=float, default=1.0, help='max depth ratio to test')
 
     args = parser.parse_args()
     return args
 
 
-def generate_prompt_landmark(n_garbage, seed, n_garbage_prefix):
-    """Generates a text file and inserts a passkey at a random position."""
+def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_context_length_buffer=250):
+    needle = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key. "
+    task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there. "
+    garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again. "
+    question = "What is the pass key? The pass key is"
+    
+    tokens_in_garbage = len(tokenizer.encode(garbage))
+    multiplier = math.ceil((context_length - len(tokenizer.encode(task_description)) - 25) / tokens_in_garbage)
+    context = garbage * multiplier
+    
+    tokens_task = tokenizer.encode(task_description)
+    tokens_needle = tokenizer.encode(needle)
+    tokens_context = tokenizer.encode(context)
+    tokens_question = tokenizer.encode(question)
+    
+    # Reduce context length by buffer
+    context_length = context_length - final_context_length_buffer - len(tokens_task) - len(tokens_question)
+    
+    # Truncate context if needed
+    if len(tokens_context) + len(tokens_task) + len(tokens_needle) + len(question) > context_length:
+        tokens_context = tokens_context[:context_length - len(tokens_needle)]
+    
+    if depth >= 1:
+        tokens_new_context = tokens_task + tokens_context + tokenizer.encode("\n") + tokens_needle + tokenizer.encode("\n") + tokens_question
+
+    elif depth == 0: 
+        tokens_new_context = tokens_task + tokens_needle + tokenizer.encode("\n") + tokens_context + tokenizer.encode("\n") + tokens_question
+
+    else:
+        insertion_point = int(len(tokens_context) * depth)
+        tokens_new_context = tokens_context[:insertion_point]
+        
+        # Find sentence break
+        period_tokens = tokenizer.encode('.')
+        while tokens_new_context and tokens_new_context[-1] not in period_tokens:
+            insertion_point -= 1
+            tokens_new_context = tokens_context[:insertion_point]
+        
+        tokens_new_context = tokens_task + tokens_new_context + tokenizer.encode("\n") + tokens_needle + tokenizer.encode("\n") + tokens_context[insertion_point:] + tokens_question
+    
+    print("Total Tokens in Context: ", len(tokens_new_context))
+    new_context = tokenizer.decode(tokens_new_context)
+    return new_context
+
+def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed=666):
+    # Generate random pass key
     rnd_state = random.get_state()
     random.seed(seed)
-    n_garbage_suffix = n_garbage - n_garbage_prefix
-
-    # task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there."
-    task_description = "I will ask you about a passkey. The passkey will appear in the following format 'The pass key is {pass_key}. Remember it. {pass_key} is the pass key. Please remember it.'"
-    # garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again."
-    garbage = "```The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.```"
-    garbage_inf = " ".join([garbage] * 5000)
-    assert len(garbage_inf) >= n_garbage
-
-    garbage_prefix = f"```{garbage_inf[:n_garbage_prefix]}```"
-    garbage_suffix = f"```{garbage_inf[:n_garbage_suffix]}```"
-
     pass_key = random.randint(1, 50000)
-    information_line = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key."
-    final_question = "What is the pass key? The pass key is"
-    lines = [
-        task_description,
-        garbage_prefix,
-        information_line,
-        garbage_suffix,
-        final_question,
-    ]
     random.set_state(rnd_state)
-    return "\n".join(lines), str(pass_key)
-
-def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage=60000, seed=666):
-    prompt, answer = generate_prompt_landmark(n_garbage, seed, n_garbage_prefix)
+    
+    prompt = generate_prompt_landmark(tokenizer, pass_key, context_length=context_length, depth=depth)
+    answer = str(pass_key)
+    
     input_ids = tokenizer(prompt, return_tensors="pt").input_ids
     input_ids = input_ids.to(device)
     len_token = input_ids.shape[-1]
@@ -79,7 +98,8 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
     print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
 
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
-
+    past_key_values = None
+    chunk_input_ids = input_ids[:, :-1]
     with torch.no_grad():
         outputs = model(input_ids[:, :-1])
         current_mem = torch.cuda.memory_allocated(device) / 1024**2
@@ -91,6 +111,7 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
             input_ids=input_ids,
             max_new_tokens=answer_ids.shape[-1] + 16,
             use_cache=True,
+            generation_config=GenerationConfig(do_sample=False, use_cache=True),
         )
         current_mem = torch.cuda.memory_allocated(device) / 1024**2
         max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
@@ -99,7 +120,7 @@ def passkey_retrieval_test(model, tokenizer, device, n_garbage_prefix, n_garbage
     model_output = tokenizer.decode(generation_output[0].cpu())
     
     # Find the number after "The pass key is"
-    matches = re.findall(r"is (\d+)", model_output)
+    matches = re.findall(r"What is the pass key \? The pass key is (\d+)", model_output)
     if matches:
         model_answer = matches[0]  # Take the first match
     else:
@@ -121,7 +142,7 @@ def main(args):
     print("base model", args.base_model)
 
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained(model_path_0, trust_remote_code=True, tmix_backend="fla")
+    model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True, tmix_backend="cuda")
     model = model.to('cuda')
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
@@ -134,21 +155,20 @@ def main(args):
     for i in range(total_test_points):
         # Calculate context length starting from min_tokens
         current_tokens = args.min_tokens + (i * args.interval)
-        # Adjust the garbage text calculation to match the new token length
-        n_garbage = int(3.75 * current_tokens // 1024 * 1024)
         
-        # Calculate depth steps starting from min_depth
-        depth_steps = np.linspace(args.min_depth, 1.0, 10)
+        # Calculate depth steps to max_depth
+        depth_steps = np.linspace(0, args.max_depth, 10) # 10 steps from 0 to max_depth
         
         for depth in depth_steps:
-            n_garbage_prefix = int(n_garbage * depth)
             passed_tests = 0
             total_tokens = 0
             
             for k in range(args.num_tests):
                 is_correct, len_tokens = passkey_retrieval_test(
-                    model, tokenizer, device, n_garbage_prefix, 
-                    n_garbage=n_garbage, seed=k
+                    model, tokenizer, device, 
+                    context_length=current_tokens,
+                    depth=depth,
+                    seed=k
                 )
                 passed_tests += is_correct
                 total_tokens += len_tokens
@@ -203,7 +223,7 @@ def main(args):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"data/heatmap_{args.max_tokens}_rwkv7_chk0_QhQ_ideal.png")
+    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_rwkv7_1b5_cuda.png")
 
 if __name__ == "__main__":
     args = parse_config()
