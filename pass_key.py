@@ -27,9 +27,9 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=16384, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
-    parser.add_argument('--interval', type=int, default=1024, help='interval for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=32768, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=45000, help='maximum token length for evaluation')
+    parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
     parser.add_argument('--max_depth', type=float, default=1.0, help='max depth ratio to test')
 
