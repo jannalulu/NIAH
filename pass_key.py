@@ -98,28 +98,18 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
     print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
 
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
-    
-    CHUNK_SIZE = 2048
     past_key_values = None
     chunk_input_ids = input_ids[:, :-1]
     with torch.no_grad():
-        # Process all tokens in chunks
-        for i in range(0, chunk_input_ids.shape[1], CHUNK_SIZE):
-            chunk = chunk_input_ids[:, i:i + CHUNK_SIZE]
-            outputs = model(
-                chunk,
-                past_key_values=past_key_values,
-            )
-            current_mem = torch.cuda.memory_allocated(device) / 1024**2
-            max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
-            print(f"Memory usage before chunk {i//CHUNK_SIZE + 1}: {current_mem:.2f}MB / {max_mem:.2f}MB")
+        outputs = model(input_ids[:, :-1])
+        current_mem = torch.cuda.memory_allocated(device) / 1024**2
+        max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
+        print(f"Memory usage after context processing: {current_mem:.2f}MB / {max_mem:.2f}MB")
 
-            past_key_values = outputs.past_key_values
-
+        # Generate the answer
         generation_output = model.generate(
-            input_ids=input_ids[:, -1:],
-            past_key_values=past_key_values,
-            max_length=answer_ids.shape[-1] + 16,
+            input_ids=input_ids,
+            max_new_tokens=answer_ids.shape[-1] + 16,
             use_cache=True,
             generation_config=GenerationConfig(do_sample=False, use_cache=True),
         )
@@ -130,7 +120,7 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
     model_output = tokenizer.decode(generation_output[0].cpu())
     
     # Find the number after "The pass key is"
-    matches = re.findall(r"is (\d+)", model_output)
+    matches = re.findall(r"What is the pass key \? The pass key is (\d+)", model_output)
     if matches:
         model_answer = matches[0]  # Take the first match
     else:
