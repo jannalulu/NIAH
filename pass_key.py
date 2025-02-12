@@ -28,7 +28,7 @@ def parse_config():
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
     parser.add_argument('--min_tokens', type=int, default=16384, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=32784, help='maximum token length for evaluation')
+    parser.add_argument('--max_tokens', type=int, default=20480, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
     parser.add_argument('--max_depth', type=float, default=1.0, help='max depth ratio to test')
@@ -120,12 +120,8 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
     model_output = tokenizer.decode(generation_output[0].cpu())
     
     # Find the number after "The pass key is"
-    matches = re.findall(r"What is the pass key \? The pass key is (\d+)", model_output)
-    if matches:
-        model_answer = matches[0]  # Take the first match
-    else:
-        model_answer = ""
-    
+    matches = re.findall(r"What is the pass key\? The pass key is (\d+)", model_output)
+    model_answer = matches[-1] if matches else None
     is_correct = (model_answer == answer)
     print(f"Model's output: {model_output}")
     print(f"Found answer: {model_answer}")
