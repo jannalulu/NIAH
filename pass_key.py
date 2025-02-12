@@ -28,7 +28,7 @@ def parse_config():
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
     parser.add_argument('--min_tokens', type=int, default=16384, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=65538, help='maximum token length for evaluation')
+    parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
     parser.add_argument('--max_depth', type=float, default=1.0, help='max depth ratio to test')
@@ -38,9 +38,9 @@ def parse_config():
 
 
 def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_context_length_buffer=250):
-    needle = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key. "
-    task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there. "
-    garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again. "
+    needle = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key.\n"
+    task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there.\n"
+    garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\n"
     question = "What is the pass key? The pass key is"
     
     tokens_in_garbage = len(tokenizer.encode(garbage))
@@ -152,7 +152,7 @@ def main(args):
     print("base model", args.base_model)
 
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained('m8than/rwkv7-1b5-128k', trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
     model = model.to('cuda')
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
@@ -233,7 +233,7 @@ def main(args):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_rwkv7_2b9_base.png")
+    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_rwkv7_1b5_base_linebreaks.png")
 
 if __name__ == "__main__":
     args = parse_config()
