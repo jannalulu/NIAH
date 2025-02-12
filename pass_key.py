@@ -138,7 +138,7 @@ def main(args):
     print("base model", args.base_model)
 
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True, tmix_backend="cuda")
+    model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True, tmix_backend="triton")
     model = model.to('cuda')
     tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-1.5B-world', trust_remote_code=True)
 
@@ -219,7 +219,7 @@ def main(args):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_rwkv7_1b5_cuda.png")
+    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_rwkv7_1b5_triton.png")
 
 if __name__ == "__main__":
     args = parse_config()
