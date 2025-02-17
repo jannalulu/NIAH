@@ -1,6 +1,5 @@
 import os
 import math
-import fla
 from transformers import GenerationConfig
 import torch
 import argparse
@@ -144,9 +143,9 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
         model_output = tokenizer.decode(generation_output[0][-14:].cpu())
     
         # Find the number after "The pass key is"
-        matches = re.findall(r"is (\d+)", model_output)
+        matches = re.findall(r"is(.*)(\d+)", model_output)
         if matches:
-            model_answer = matches[0]  # Take the first match
+            model_answer = matches[1]  # Take the first match
         else:
             model_answer = ""
         
