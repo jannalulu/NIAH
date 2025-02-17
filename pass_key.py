@@ -142,7 +142,7 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
         # Get the last 16 tokens from the generation output
         model_output = tokenizer.decode(generation_output[0][-14:].cpu())
     
-        # Find the number after "The pass key is"
+        # Find the number after "The pass key is", skipping any non number text
         matches = re.findall(r"is[\D]*(\d+)", model_output)
         if matches:
             model_answer = matches[0]  # Take the first match
