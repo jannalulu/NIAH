@@ -47,10 +47,10 @@ def parse_config():
 
 
 def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_context_length_buffer=250):
-    needle = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key.\n"
-    task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there.\n"
-    garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\n"
-    question = "\n\nWhat is the pass key? The pass key is"
+    needle = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key. "
+    task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there. "
+    garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again. "
+    question = " What is the pass key? The pass key is"
     
     tokens_in_garbage = len(tokenizer.encode(garbage))
     multiplier = math.ceil((context_length - len(tokenizer.encode(task_description)) - 25) / tokens_in_garbage)
@@ -66,7 +66,7 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
     context_length = context_length - final_context_length_buffer - len(tokens_task) - len(tokens_question)
     
     # Truncate context if needed
-    if len(tokens_context) + len(tokens_task) + len(tokens_needle) + len(question) > context_length:
+    if len(tokens_context) + len(tokens_task) + len(tokens_needle) + len(tokens_question) > context_length:
         tokens_context = tokens_context[:context_length - len(tokens_needle)]
     
     if depth >= 1:
