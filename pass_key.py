@@ -32,7 +32,7 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('hf_model', type=str)
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=8192, help='minimum token length to start evaluation')
+    parser.add_argument('--min_tokens', type=int, default=1024, help='minimum token length to start evaluation')
     parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
@@ -133,6 +133,7 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
             # past_key_values=past_key_values,
             max_new_tokens=10,
             use_cache=enable_kv_caching,
+            do_sample=False,
             # generation_config=GenerationConfig(do_sample=False, use_cache=enable_kv_caching),
         )
         current_mem = torch.cuda.memory_allocated(device) / 1024**2
@@ -143,14 +144,14 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
         model_output = tokenizer.decode(generation_output[0][-14:].cpu())
     
         # Find the number after "The pass key is"
-        matches = re.findall(r"is(.*)(\d+)", model_output)
+        matches = re.findall(r"is\s*\**(\d+)\**", model_output)
         if matches:
-            model_answer = matches[1]  # Take the first match
+            model_answer = matches[0]  # Take the first match
         else:
             model_answer = ""
         
         is_correct = (model_answer == answer)
-        print(f"Model's output: ... {model_output}")
+        print(f"Model's output: {model_output}")
         print(f"Found answer: {model_answer}")
         print(f"Correct answer: {answer}")
         print(f"Is correct: {is_correct}\n")
