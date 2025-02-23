@@ -256,7 +256,8 @@ def main(args):
     model_path_parts = args.hf_model.split('/')
     sanitized_model_name = '_'.join(model_path_parts[-2:] if len(model_path_parts) > 1 else model_path_parts[-1:])
     
-    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_{sanitized_model_name}_linebreaks.png")
+    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_{sanitized_model_name}.png")
+    df_summary.to_csv(f"data/results_tokenized_{args.max_tokens}_{sanitized_model_name}.csv", index=False)
 
 if __name__ == "__main__":
     args = parse_config()
