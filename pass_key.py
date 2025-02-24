@@ -50,7 +50,7 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
     needle = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key. "
     task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there. "
     garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again. "
-    question = " What is the pass key? The pass key is"
+    question = "What is the pass key? The pass key is"
     
     tokens_in_garbage = len(tokenizer.encode(garbage))
     multiplier = math.ceil((context_length - len(tokenizer.encode(task_description)) - 25) / tokens_in_garbage)
@@ -72,7 +72,7 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
     if depth >= 1:
         tokens_new_context = tokens_task + tokens_context + token_newline + tokens_needle + token_newline + tokens_question
 
-    elif depth == 0: 
+    elif depth == 0:
         tokens_new_context = tokens_task + tokens_needle + token_newline + tokens_context + token_newline + tokens_question
 
     else:
@@ -151,6 +151,7 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
             model_answer = ""
         
         is_correct = (model_answer == answer)
+        print(prompt)
         print(f"Model's output: {model_output}")
         print(f"Found answer: {model_answer}")
         print(f"Correct answer: {answer}")
