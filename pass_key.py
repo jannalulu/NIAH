@@ -32,7 +32,7 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('hf_model', type=str)
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=8192, help='minimum token length to start evaluation')
+    parser.add_argument('--min_tokens', type=int, default=1024, help='minimum token length to start evaluation')
     parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
@@ -47,10 +47,10 @@ def parse_config():
 
 
 def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_context_length_buffer=250):
-    needle = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key.\n"
-    task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there.\n"
-    garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\n"
-    question = "\n\nWhat is the pass key? The pass key is"
+    needle = f"The pass key is {pass_key}. Remember it. {pass_key} is the pass key. "
+    task_description = "There is an important info hidden inside a lot of irrelevant text. Find it and memorize them. I will quiz you about the important information there. "
+    garbage = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again. "
+    question = "What is the pass key? The pass key is"
     
     tokens_in_garbage = len(tokenizer.encode(garbage))
     multiplier = math.ceil((context_length - len(tokenizer.encode(task_description)) - 25) / tokens_in_garbage)
@@ -66,13 +66,13 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
     context_length = context_length - final_context_length_buffer - len(tokens_task) - len(tokens_question)
     
     # Truncate context if needed
-    if len(tokens_context) + len(tokens_task) + len(tokens_needle) + len(question) > context_length:
+    if len(tokens_context) + len(tokens_task) + len(tokens_needle) + len(tokens_question) > context_length:
         tokens_context = tokens_context[:context_length - len(tokens_needle)]
     
     if depth >= 1:
         tokens_new_context = tokens_task + tokens_context + token_newline + tokens_needle + token_newline + tokens_question
 
-    elif depth == 0: 
+    elif depth == 0:
         tokens_new_context = tokens_task + tokens_needle + token_newline + tokens_context + token_newline + tokens_question
 
     else:
@@ -133,6 +133,7 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
             # past_key_values=past_key_values,
             max_new_tokens=10,
             use_cache=enable_kv_caching,
+            do_sample=False,
             # generation_config=GenerationConfig(do_sample=False, use_cache=enable_kv_caching),
         )
         current_mem = torch.cuda.memory_allocated(device) / 1024**2
@@ -142,6 +143,7 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
         # Get the last 16 tokens from the generation output
         model_output = tokenizer.decode(generation_output[0][-14:].cpu())
     
+
         # Find the number after "The pass key is", skipping any non number text
         matches = re.findall(r"is[\D]*(\d+)", model_output)
         if matches:
@@ -150,7 +152,9 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
             model_answer = ""
         
         is_correct = (model_answer == answer)
-        print(f"Model's output: ... {model_output}")
+
+        print(f"Model's output: {model_output}")
+
         print(f"Found answer: {model_answer}")
         print(f"Correct answer: {answer}")
         print(f"Is correct: {is_correct}\n")
@@ -254,8 +258,10 @@ def main(args):
     # Extract last 2 path components and create sanitized filename
     model_path_parts = args.hf_model.split('/')
     sanitized_model_name = '_'.join(model_path_parts[-2:] if len(model_path_parts) > 1 else model_path_parts[-1:])
-    
-    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_{sanitized_model_name}_linebreaks.png")
+   
+    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_{sanitized_model_name}.png")
+    df_summary.to_csv(f"data/results_tokenized_{args.max_tokens}_{sanitized_model_name}.csv", index=False)
+
 
 if __name__ == "__main__":
     args = parse_config()
