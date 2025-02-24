@@ -143,16 +143,18 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
         # Get the last 16 tokens from the generation output
         model_output = tokenizer.decode(generation_output[0][-14:].cpu())
     
-        # Find the number after "The pass key is"
-        matches = re.findall(r"is\s*\**(\d+)\**", model_output)
+
+        # Find the number after "The pass key is", skipping any non number text
+        matches = re.findall(r"is[\D]*(\d+)", model_output)
         if matches:
             model_answer = matches[0]  # Take the first match
         else:
             model_answer = ""
         
         is_correct = (model_answer == answer)
-        print(prompt)
+
         print(f"Model's output: {model_output}")
+
         print(f"Found answer: {model_answer}")
         print(f"Correct answer: {answer}")
         print(f"Is correct: {is_correct}\n")
@@ -256,9 +258,10 @@ def main(args):
     # Extract last 2 path components and create sanitized filename
     model_path_parts = args.hf_model.split('/')
     sanitized_model_name = '_'.join(model_path_parts[-2:] if len(model_path_parts) > 1 else model_path_parts[-1:])
-    
+   
     plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_{sanitized_model_name}.png")
     df_summary.to_csv(f"data/results_tokenized_{args.max_tokens}_{sanitized_model_name}.csv", index=False)
+
 
 if __name__ == "__main__":
     args = parse_config()
