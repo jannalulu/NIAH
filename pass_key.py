@@ -76,7 +76,7 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
         tokens_new_context = tokens_task + tokens_context + tokenizer.encode("\n") + tokens_needle + tokenizer.encode("\n") + tokens_question
 
     elif depth == 0:
-        tokens_new_context = tokens_task + tokens_needle + token_newline + tokens_context + token_newline + tokens_question
+        tokens_new_context = tokens_task + tokens_needle + tokens_newline + tokens_context + tokens_newline + tokens_question
 
     else:
         insertion_point = int(len(tokens_context) * depth)
