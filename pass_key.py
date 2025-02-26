@@ -28,8 +28,8 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=1024, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=32768, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=45000, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=55000, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
     parser.add_argument('--max_depth', type=float, default=1.0, help='max depth ratio to test')
@@ -52,6 +52,7 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
     tokens_needle = tokenizer.encode(needle)
     tokens_context = tokenizer.encode(context)
     tokens_question = tokenizer.encode(question)
+    tokens_newline = tokenizer.encode("\n")
     
     # Reduce context length by buffer
     context_length = context_length - final_context_length_buffer - len(tokens_task) - len(tokens_question)
@@ -61,7 +62,7 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
         tokens_context = tokens_context[:context_length - len(tokens_needle)]
     
     if depth >= 1:
-        tokens_new_context = tokens_task + tokens_context + tokenizer.encode("\n") + tokens_needle + tokenizer.encode("\n") + tokens_question
+        tokens_new_context = tokens_task + tokens_context + tokens_newline + tokens_needle + tokens_newline + tokens_question
 
     elif depth == 0:
         tokens_new_context = tokens_task + tokens_needle + tokens_newline + tokens_context + tokens_newline + tokens_question
@@ -76,7 +77,7 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
             insertion_point -= 1
             tokens_new_context = tokens_context[:insertion_point]
         
-        tokens_new_context = tokens_task + tokens_new_context + tokenizer.encode("\n") + tokens_needle + tokenizer.encode("\n") + tokens_context[insertion_point:] + tokens_question
+        tokens_new_context = tokens_task + tokens_new_context + tokens_newline + tokens_needle + tokens_newline + tokens_context[insertion_point:] + tokens_question
     
     print("Total Tokens in Context: ", len(tokens_new_context))
     new_context = tokenizer.decode(tokens_new_context)
@@ -152,9 +153,9 @@ def main(args):
     torch.set_float32_matmul_precision('high')
 
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained('fla-hub/rwkv6-1.6B-finch', trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained('SmerkyG/RWKV7-2.9B-World3-128k-250225', trust_remote_code=True)
     model = model.to('cuda')
-    tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv6-1.6B-finch', trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-2.9B-world', trust_remote_code=True)
 
     model.eval()
 
