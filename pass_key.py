@@ -4,7 +4,7 @@ import math
 import fla
 from transformers import GenerationConfig
 import torch
-import jsons
+import json
 import argparse
 import random
 import re
