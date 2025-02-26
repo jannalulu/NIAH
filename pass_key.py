@@ -1,4 +1,3 @@
-
 import os
 import math
 import fla
@@ -25,15 +24,25 @@ def get_gpu_memory():
     return torch.cuda.memory_allocated() / 1024 / 1024
 
 def parse_config():
+    """Parse command line arguments.
+    
+    Returns:
+        argparse.Namespace: Parsed arguments including:
+            - Standard evaluation parameters
+            - HF model path and cache directory
+            - Optional HF model arguments as JSON string
+    """
     parser = argparse.ArgumentParser(description='arg parser')
-    parser.add_argument('--base_model', type=str, default="fla-hub/rwkv7-1.5B-world")
+    parser.add_argument('hf_model', type=str)
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=45000, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=55000, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=37000, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=47148, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
     parser.add_argument('--max_depth', type=float, default=1.0, help='max depth ratio to test')
-
+    parser.add_argument('--device', type=str, default='cuda:0', help='device to use for computation')
+    parser.add_argument('--hf_model_args', type=str, default='{}',
+                      help='Additional HuggingFace model arguments as JSON string')
     args = parser.parse_args()
     return args
 
@@ -58,7 +67,7 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
     context_length = context_length - final_context_length_buffer - len(tokens_task) - len(tokens_question)
     
     # Truncate context if needed
-    if len(tokens_context) + len(tokens_task) + len(tokens_needle) + len(question) > context_length:
+    if len(tokens_context) + len(tokens_task) + len(tokens_needle) + len(tokens_question) > context_length:
         tokens_context = tokens_context[:context_length - len(tokens_needle)]
     
     if depth >= 1:
@@ -132,14 +141,13 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
     model_output = tokenizer.decode(generation_output[0].cpu())
     
     # Find the number after "The pass key is"
-    matches = re.findall(r"is (\d+)", model_output)
+    matches = re.findall(r"is[\D]*(\d+)", model_output)
     if matches:
         model_answer = matches[0]  # Take the first match
     else:
         model_answer = ""
     
     is_correct = (model_answer == answer)
-    print(prompt)
     print(f"Model's output: {model_output}")
     print(f"Found answer: {model_answer}")
     print(f"Correct answer: {answer}")
@@ -152,11 +160,18 @@ def main(args):
     torch.cuda.set_device(device)
     torch.set_float32_matmul_precision('high')
 
-    # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained('SmerkyG/RWKV7-2.9B-World3-128k-250225', trust_remote_code=True)
-    model = model.to('cuda')
-    tokenizer = AutoTokenizer.from_pretrained('fla-hub/rwkv7-2.9B-world', trust_remote_code=True)
+    print("HF Model", args.hf_model)
 
+    # Parse additional HF model arguments
+    hf_model_args = json.loads(args.hf_model_args)
+    
+    # Load model and tokenizer
+    model = AutoModelForCausalLM.from_pretrained(
+        args.hf_model,
+        trust_remote_code=True,
+        **hf_model_args
+    ).bfloat16().to(device)
+    tokenizer = AutoTokenizer.from_pretrained(args.hf_model, trust_remote_code=True)
     model.eval()
 
     # Calculate number of test points starting from min_tokens
@@ -234,7 +249,13 @@ def main(args):
     plt.xticks(rotation=45)
     plt.yticks(rotation=0)
     plt.tight_layout()
-    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_rwkv7_1b5_base_linebreaks.png")
+    
+    # Extract last 2 path components and create sanitized filename
+    model_path_parts = args.hf_model.split('/')
+    sanitized_model_name = '_'.join(model_path_parts[-2:] if len(model_path_parts) > 1 else model_path_parts[-1:])
+   
+    plt.savefig(f"data/heatmap_tokenized_{args.max_tokens}_{sanitized_model_name}.png")
+    df_summary.to_csv(f"data/results_tokenized_{args.max_tokens}_{sanitized_model_name}.csv", index=False)
 
 if __name__ == "__main__":
     args = parse_config()
