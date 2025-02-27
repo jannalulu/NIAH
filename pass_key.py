@@ -35,8 +35,8 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('hf_model', type=str)
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=37000, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=47148, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=27000, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=65536, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=2048, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
     parser.add_argument('--max_depth', type=float, default=1.0, help='max depth ratio to test')
@@ -123,7 +123,6 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
             )
             current_mem = torch.cuda.memory_allocated(device) / 1024**2
             max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
-            print(f"Memory usage before chunk {i//CHUNK_SIZE + 1}: {current_mem:.2f}MB / {max_mem:.2f}MB")
 
             past_key_values = outputs.past_key_values
 
