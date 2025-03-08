@@ -7,9 +7,12 @@ from matplotlib.colors import LinearSegmentedColormap
 # Load the data
 df = pd.read_csv('data/results_tokenized_65538_rwkv7_1b5_128k.csv')
 
+# Filter out Document Depth = 100
+df_filtered = df[df['Document Depth'] != 100]
+
 # Create a pivot table for the heatmap
 pivot_table = pd.pivot_table(
-    df, values='Score', index=['Document Depth', 'Context Length'], 
+    df_filtered, values='Score', index=['Document Depth', 'Context Length'], 
     aggfunc='mean'
 ).reset_index()
 pivot_table = pivot_table.pivot(
@@ -44,23 +47,11 @@ plt.xticks(
 )
 
 # Format y-axis (document depth)
-depths = sorted(df['Document Depth'].unique())
+depths_filtered = sorted(df_filtered['Document Depth'].unique())
 
-# Get min and max depth values
-min_depth = min(depths)
-max_depth = max(depths)
-
-# Calculate middle value (50% of the range)
-mid_depth = min_depth + (max_depth - min_depth) / 2
-
-# Define the values to show on the axis (0%, 50%, 100% of the range)
-y_values = [min_depth, mid_depth, max_depth]
-
-# Calculate the positions
-positions = [0, (len(depths) - 1) / 2, len(depths) - 1]
-
-# Generate labels based on the actual values
-labels = [str(int(val)) for val in y_values]
+# Set positions and labels for y-ticks
+positions = [0, len(depths_filtered)/2, len(depths_filtered)]
+labels = ["0", "50", "100"]
 
 plt.yticks(
     positions,
