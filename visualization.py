@@ -5,7 +5,7 @@ import seaborn as sns
 from matplotlib.colors import LinearSegmentedColormap
 
 # Load the data
-df = pd.read_csv('data/results_tokenized_65538_rwkv7_1b5_128k.csv')
+df = pd.read_csv('data/results_tokenized_65536_rwkv7_1b5_128k_complete.csv')
 
 # Filter out Document Depth = 100
 df_filtered = df[df['Document Depth'] != 100]
@@ -72,7 +72,7 @@ for spine in ax.spines.values():
 plt.tight_layout(pad=0.5)
 
 # Save the figure with high DPI for clarity when small
-plt.savefig('data/heatmap_square_65538_rwkv7_1b5_128k.png', dpi=300, bbox_inches='tight')
+plt.savefig('data/heatmap_square_65536_rwkv7_1b5_128k.png', dpi=300, bbox_inches='tight')
 
 # Show the plot
 plt.show()
