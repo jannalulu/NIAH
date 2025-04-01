@@ -35,8 +35,8 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('hf_model', type=str)
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=65738, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=65738, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=14000, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=14000, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=1024, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=1, help='number of repeat testing for each length')
     parser.add_argument('--max_depth', type=float, default=1.0, help='max depth ratio to test')
@@ -110,28 +110,35 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
     
     with torch.no_grad():
+        chunk_input_ids = input_ids[:, :-1]
         CHUNK_SIZE = 2048
-        for i in range(0, input_ids.shape[1], CHUNK_SIZE):
-            end_idx = min(i + CHUNK_SIZE, input_ids.shape[1])
-            _ = model(input_ids[:, i:end_idx])
-            torch.cuda.empty_cache()
-        
-        # Generate new content
-        generation_output = model.generate(
-            input_ids=input_ids,
-            max_new_tokens=20,
-            use_cache=True,
-            generation_config=GenerationConfig(
-                do_sample=False,
+        past_key_values = None
+        for i in range(0, chunk_input_ids.shape[1], CHUNK_SIZE):
+            chunk = chunk_input_ids[:, i:min(i + CHUNK_SIZE, chunk_input_ids.shape[1])]
+            outputs = model(
+                chunk,
+                past_key_values=past_key_values,
                 use_cache=True,
-            ),
-        )
-        model_output = tokenizer.decode(generation_output[0].cpu())
+            )
+            past_key_values = outputs.past_key_values
 
+        last_token_input_ids = input_ids[:, -1:]
+        cached_seq_len = chunk_input_ids.shape[1] 
+        max_new_tokens_to_generate = answer_ids.shape[-1] + 16
+        generation_output = model.generate(
+            input_ids=last_token_input_ids,
+            past_key_values=past_key_values,
+            max_new_tokens=max_new_tokens_to_generate,
+            use_cache=True,
+            do_sample=False,
+        )
         current_mem = torch.cuda.memory_allocated(device) / 1024**2
         max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
         print(f"Memory usage after generate: {current_mem:.2f}MB / {max_mem:.2f}MB")
-    
+
+    model_output_ids = generation_output[0, :] # Keep all tokens generated
+    model_output = tokenizer.decode(model_output_ids.cpu())
+
     # Find the number after "The pass key is"
     matches = re.findall(r"is[\D]*(\d+)", model_output)
     if matches:
