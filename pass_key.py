@@ -1,7 +1,7 @@
 import os
 import math
 import fla
-from transformers import GenerationConfig
+from transformers import GenerationConfig, TextStreamer
 import torch
 import json
 import argparse
@@ -35,10 +35,10 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('hf_model', type=str)
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=1024, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=65536, help='maximum token length for evaluation')
+    parser.add_argument('--min_tokens', type=int, default=65738, help='minimum token length to start evaluation')
+    parser.add_argument('--max_tokens', type=int, default=65738, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=1024, help='interval for evaluation')
-    parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
+    parser.add_argument('--num_tests', type=int, default=1, help='number of repeat testing for each length')
     parser.add_argument('--max_depth', type=float, default=1.0, help='max depth ratio to test')
     parser.add_argument('--device', type=str, default='cuda:0', help='device to use for computation')
     parser.add_argument('--hf_model_args', type=str, default='{}',
@@ -107,37 +107,36 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
     len_token = input_ids.shape[-1]
 
     print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
-
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
+    streamer = TextStreamer(tokenizer)
     
-    CHUNK_SIZE = 2048
-    past_key_values = None
-    chunk_input_ids = input_ids[:, :-1]
     with torch.no_grad():
-        # Process all tokens in chunks
-        for i in range(0, chunk_input_ids.shape[1], CHUNK_SIZE):
-            chunk = chunk_input_ids[:, i:i + CHUNK_SIZE]
-            outputs = model(
-                chunk,
-                past_key_values=past_key_values,
+        try:
+            CHUNK_SIZE = 2048
+            for i in range(0, input_ids.shape[1], CHUNK_SIZE):
+                end_idx = min(i + CHUNK_SIZE, input_ids.shape[1])
+                _ = model(input_ids[:, i:end_idx])
+                torch.cuda.empty_cache()
+            
+            # Generate new content with streamer for efficiency
+            # This approach doesn't try to use past_key_values from chunked processing
+            generation_output = model.generate(
+                input_ids=input_ids,
+                max_new_tokens=20,
+                streamer=streamer,
+                use_cache=True,
+                generation_config=GenerationConfig(
+                    do_sample=False,
+                    use_cache=True,
+                ),
             )
-            current_mem = torch.cuda.memory_allocated(device) / 1024**2
-            max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
-
-            past_key_values = outputs.past_key_values
-
-        generation_output = model.generate(
-            input_ids=input_ids[:, -1:],
-            past_key_values=past_key_values,
-            max_length=answer_ids.shape[-1] + 16,
-            use_cache=True,
-            generation_config=GenerationConfig(do_sample=False, use_cache=True),
-        )
+            model_output = tokenizer.decode(generation_output[0].cpu())
+        except Exception as e:
+            print(f"Error in generation: {e}")
+            
         current_mem = torch.cuda.memory_allocated(device) / 1024**2
         max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
         print(f"Memory usage after generate: {current_mem:.2f}MB / {max_mem:.2f}MB")
-    
-    model_output = tokenizer.decode(generation_output[0].cpu())
     
     # Find the number after "The pass key is"
     matches = re.findall(r"is[\D]*(\d+)", model_output)
