@@ -1,7 +1,7 @@
 import os
 import math
 import fla
-from transformers import GenerationConfig, TextStreamer
+from transformers import GenerationConfig
 import torch
 import json
 import argparse
@@ -108,32 +108,26 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
 
     print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
     answer_ids = tokenizer(answer, return_tensors="pt").input_ids
-    streamer = TextStreamer(tokenizer)
     
     with torch.no_grad():
-        try:
-            CHUNK_SIZE = 2048
-            for i in range(0, input_ids.shape[1], CHUNK_SIZE):
-                end_idx = min(i + CHUNK_SIZE, input_ids.shape[1])
-                _ = model(input_ids[:, i:end_idx])
-                torch.cuda.empty_cache()
-            
-            # Generate new content with streamer for efficiency
-            # This approach doesn't try to use past_key_values from chunked processing
-            generation_output = model.generate(
-                input_ids=input_ids,
-                max_new_tokens=20,
-                streamer=streamer,
+        CHUNK_SIZE = 2048
+        for i in range(0, input_ids.shape[1], CHUNK_SIZE):
+            end_idx = min(i + CHUNK_SIZE, input_ids.shape[1])
+            _ = model(input_ids[:, i:end_idx])
+            torch.cuda.empty_cache()
+        
+        # Generate new content
+        generation_output = model.generate(
+            input_ids=input_ids,
+            max_new_tokens=20,
+            use_cache=True,
+            generation_config=GenerationConfig(
+                do_sample=False,
                 use_cache=True,
-                generation_config=GenerationConfig(
-                    do_sample=False,
-                    use_cache=True,
-                ),
-            )
-            model_output = tokenizer.decode(generation_output[0].cpu())
-        except Exception as e:
-            print(f"Error in generation: {e}")
-            
+            ),
+        )
+        model_output = tokenizer.decode(generation_output[0].cpu())
+
         current_mem = torch.cuda.memory_allocated(device) / 1024**2
         max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
         print(f"Memory usage after generate: {current_mem:.2f}MB / {max_mem:.2f}MB")
