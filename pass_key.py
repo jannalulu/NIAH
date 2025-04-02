@@ -158,89 +158,44 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
             do_sample=False,
         )
         
-        # Just patch the prepare_inputs_for_generation method - a simpler approach
-        # The main issue is with empty cache_position in the DynamicCache
-        
-        # Save original method
-        original_prepare_inputs = transformers.generation.utils.GenerationMixin.prepare_inputs_for_generation
-        
-        # We don't need to patch model-specific methods, just fix the cache_position
-        def patched_prepare_inputs(self, input_ids, past_key_values=None, attention_mask=None, 
-                                 inputs_embeds=None, cache_position=None, **kwargs):
-            """
-            Handle empty cache_position by initializing it properly
-            """
-            # Fix empty cache_position when using DynamicCache
-            if past_key_values is not None and isinstance(past_key_values, transformers.cache_utils.DynamicCache):
-                if cache_position is None or (hasattr(cache_position, 'shape') and cache_position.shape[0] == 0):
-                    # Create a proper cache_position based on past sequence length
-                    past_length = past_key_values.get_seq_length()
-                    cache_position = torch.arange(past_length, dtype=torch.long, device=input_ids.device)
-                    print(f"Created cache_position with length {past_length}")
-            
-            # Call the original method with our fixed inputs
-            try:
-                return original_prepare_inputs(self, input_ids, past_key_values, attention_mask, 
-                                             inputs_embeds, cache_position, **kwargs)
-            except IndexError as e:
-                if "index -1 is out of bounds for dimension 0 with size 0" in str(e):
-                    print("Caught IndexError, using alternative approach")
-                    # For this specific error, don't use past_key_values
-                    return {"input_ids": input_ids, 
-                            "attention_mask": attention_mask,
-                            "past_key_values": None}  # Don't use cached KV
-                raise
-        
-        success = False
-        generation_output = None
-        
+        # Robust approach: try with KV cache first, fall back to full sequence if needed
+        print("Attempting generation with KV cache first...")
         try:
-            # Apply prepare_inputs patch
-            transformers.generation.utils.GenerationMixin.prepare_inputs_for_generation = patched_prepare_inputs
-            print("Patched prepare_inputs_for_generation method")
-            
-            # Now try generation with the patched method
+            # First attempt: use KV cache (skipping position_ids which can cause issues)
             generation_output = model.generate(
                 input_ids=last_token_input_ids,
                 past_key_values=past_key_values,
                 attention_mask=final_attention_mask,
-                position_ids=final_position_ids,
                 generation_config=generation_config
             )
-            print(f"Generation successful with patched method, output shape: {generation_output.shape}")
-            success = True
-                
+            print(f"Generation with KV cache successful, output shape: {generation_output.shape}")
+        
         except Exception as e:
-            print(f"\nError during generation with patch: {e}")
-            print("Falling back to full sequence generation")
+            # Handle any error with KV cache approach
+            print(f"Error with KV cache approach: {e}")
+            print("Trying alternative approach with full sequence...")
             
             try:
-                # Last resort - use full input sequence
+                # Second attempt: use the full sequence (safer but potentially OOM for large contexts)
                 generation_output = model.generate(
                     input_ids=input_ids,  # Full sequence
                     generation_config=generation_config
                 )
                 print(f"Full sequence generation successful, output shape: {generation_output.shape}")
                 
-                # Since we used full sequence, extract just the generated tokens
+                # Extract just the newly generated tokens for consistency
                 if generation_output.shape[1] > input_ids.shape[1]:
                     new_tokens = generation_output[:, input_ids.shape[1]:]
                     generation_output = torch.cat([last_token_input_ids, new_tokens], dim=1)
                     print(f"Extracted new tokens, shape now: {generation_output.shape}")
-                    
-                success = True
             except Exception as e2:
-                print(f"Error with full sequence generation: {e2}")
+                print(f"Error with full sequence approach: {e2}")
+                import traceback
+                traceback.print_exc()
+                return False, seq_len  # Indicate failure
         
-        finally:
-            # Always restore original method, even if an error occurs
-            transformers.generation.utils.GenerationMixin.prepare_inputs_for_generation = original_prepare_inputs
-            print("Restored original prepare_inputs_for_generation method")
-        
-        if not success:
-            return False, seq_len  # Indicate failure
-            
         print(f"model.generate() finished. Output shape: {generation_output.shape}")
+    
     # --- Process Results ---
     # The output sequence includes the input token(s) provided to generate()
     # Since we provided only the last token (shape [1, 1]), we skip the first token in the output.
