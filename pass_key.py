@@ -36,7 +36,7 @@ def parse_config():
     parser.add_argument('hf_model', type=str)
     parser.add_argument('--cache_dir', type=str, default="./cache")
     parser.add_argument('--min_tokens', type=int, default=14000, help='minimum token length to start evaluation')
-    parser.add_argument('--max_tokens', type=int, default=14000, help='maximum token length for evaluation')
+    parser.add_argument('--max_tokens', type=int, default=16000, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=1024, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=1, help='number of repeat testing for each length')
     parser.add_argument('--max_depth', type=float, default=1.0, help='max depth ratio to test')
@@ -106,97 +106,82 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
     len_token = input_ids.shape[-1]
 
     answer_ids = tokenizer(answer).input_ids # Get token IDs for answer length
-
     max_new_tokens = len(answer_ids) + 20
 
     past_key_values = None
     processed_len = 0
     prefill_ids = input_ids[:, :-1]
     prefill_len = prefill_ids.shape[1]
-    chunk_size=2048
+    chunk_size = 2048
 
+    # Process the prompt in chunks (for long context)
     with torch.no_grad():
+        # Chunked prefill stage
         for i in range(0, prefill_len, chunk_size):
             chunk = prefill_ids[:, i : min(i + chunk_size, prefill_len)]
             chunk_len = chunk.shape[1]
 
-            current_attention_mask = torch.ones(1, processed_len + chunk_len, dtype=torch.long, device=device)
             current_position_ids = torch.arange(processed_len, processed_len + chunk_len, dtype=torch.long, device=device).unsqueeze(0)
 
-            try:
-                outputs = model(
-                    input_ids=chunk,
-                    past_key_values=past_key_values,
-                    attention_mask=current_attention_mask,
-                    position_ids=current_position_ids,
-                    use_cache=True,
-                )
-                past_key_values = outputs.past_key_values
-                processed_len += chunk_len
-            except Exception as e:
-                 print(f"\nError during prefill chunk {i // chunk_size} processing {processed_len} to {processed_len+chunk_len}: {e}")
-                 raise e
+            outputs = model(
+                input_ids=chunk,
+                past_key_values=past_key_values,
+                position_ids=current_position_ids,
+                use_cache=True,
+            )
+            past_key_values = outputs.past_key_values
+            processed_len += chunk_len
 
-        # Final Forward Pass (for the Nth token)
+        # Final forward pass for the last token
         last_token_input_ids = input_ids[:, -1:]
         last_token_pos_id = torch.tensor([[processed_len]], dtype=torch.long, device=device)
         final_prompt_mask = torch.ones(1, processed_len + 1, dtype=torch.long, device=device)
 
-        try:
-            outputs = model(
-                input_ids=last_token_input_ids,
-                past_key_values=past_key_values,
-                # attention_mask=final_prompt_mask,
-                position_ids=last_token_pos_id,
-                use_cache=True,
-            )
-            logits = outputs.logits # Logits for the *next* token
-            past_key_values = outputs.past_key_values # Final cache after full prompt
-            processed_len += 1
-        except Exception as e:
-            print(f"\nError during final forward pass: {e}")
-            del past_key_values; torch.cuda.empty_cache()
-            raise e
+        outputs = model(
+            input_ids=last_token_input_ids,
+            past_key_values=past_key_values,
+            position_ids=last_token_pos_id,
+            use_cache=True,
+        )
+        logits = outputs.logits  # Logits for the *next* token
+        past_key_values = outputs.past_key_values  # Final cache after full prompt
+        processed_len += 1
 
+        # Generation stage
         generated_ids_list = []
 
         # Get the first generated token ID
-        next_token_logits = logits[:, -1, :] # Shape [batch_size, vocab_size]
-        next_token_id = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1) # Shape [batch_size, 1]
+        next_token_logits = logits[:, -1, :]  # Shape [batch_size, vocab_size]
+        next_token_id = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)  # Shape [batch_size, 1]
 
         for step in range(max_new_tokens):
             generated_ids_list.append(next_token_id.item())
 
             # Prepare inputs for the next step model call
-            step_attention_mask = torch.ones(1, processed_len + 1, dtype=torch.long, device=device) # Mask includes the token we are feeding
-            step_position_ids = torch.tensor([[processed_len]], dtype=torch.long, device=device) # Position of the token we are feeding
+            step_position_ids = torch.tensor([[processed_len]], dtype=torch.long, device=device)
 
-            try:
-                outputs = model(
-                    input_ids=next_token_id, # Feed the just-generated token
-                    past_key_values=past_key_values,
-                    attention_mask=step_attention_mask,
-                    position_ids=step_position_ids,
-                    use_cache=True,
-                )
-            except Exception as e:
-                 print(f"\nError during generation step {step}: {e}")
-                 del past_key_values; torch.cuda.empty_cache()
-                 raise e
+            outputs = model(
+                input_ids=next_token_id,
+                past_key_values=past_key_values,
+                position_ids=step_position_ids,
+                use_cache=True,
+            )
 
             logits = outputs.logits
-            past_key_values = outputs.past_key_values # Update cache
-            processed_len += 1 # Sequence length grows
+            past_key_values = outputs.past_key_values  # Update cache
+            processed_len += 1  # Sequence length grows
 
             # Get the ID for the *next* token
             next_token_logits = logits[:, -1, :]
             next_token_id = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
 
+    # Decode and evaluate the model's output
     model_output = tokenizer.decode(generated_ids_list)
 
     matches = re.findall(r"[\D]*(\d+)", model_output)
     model_answer = matches[0] if matches else ""
     is_correct = (model_answer == answer)
+    
     print(f"Model's output: {model_output}")
     print(f"Found answer: {model_answer}")
     print(f"Correct answer: {answer}")
