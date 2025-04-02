@@ -98,60 +98,99 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
     random.seed(seed)
     pass_key = random.randint(1, 50000)
     random.set_state(rnd_state)
-    
+
     prompt = generate_prompt_landmark(tokenizer, pass_key, context_length=context_length, depth=depth)
     answer = str(pass_key)
-    
-    input_ids = tokenizer(prompt, return_tensors="pt").input_ids
-    input_ids = input_ids.to(device)
+    input_token_ids = tokenizer(prompt, return_tensors=None).input_ids
+    input_ids = torch.tensor([input_token_ids], device=device)
     len_token = input_ids.shape[-1]
 
-    print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
+    answer_ids = tokenizer(answer).input_ids # Get token IDs for answer length
+    max_new_tokens = len(answer_ids) + 20
 
-    answer_ids = tokenizer(answer, return_tensors="pt").input_ids
-    
-    CHUNK_SIZE = 2048
     past_key_values = None
-    chunk_input_ids = input_ids[:, :-1]
+    processed_len = 0
+    prefill_ids = input_ids[:, :-1]
+    prefill_len = prefill_ids.shape[1]
+    chunk_size = 2048
+
+    # Process the prompt in chunks (for long context)
     with torch.no_grad():
-        # Process all tokens in chunks
-        for i in range(0, chunk_input_ids.shape[1], CHUNK_SIZE):
-            chunk = chunk_input_ids[:, i:i + CHUNK_SIZE]
+        # Chunked prefill stage
+        for i in range(0, prefill_len, chunk_size):
+            chunk = prefill_ids[:, i : min(i + chunk_size, prefill_len)]
+            chunk_len = chunk.shape[1]
+
+            current_position_ids = torch.arange(processed_len, processed_len + chunk_len, dtype=torch.long, device=device).unsqueeze(0)
+
             outputs = model(
-                chunk,
+                input_ids=chunk,
                 past_key_values=past_key_values,
+                position_ids=current_position_ids,
+                use_cache=True,
             )
-            current_mem = torch.cuda.memory_allocated(device) / 1024**2
-            max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
-
             past_key_values = outputs.past_key_values
+            processed_len += chunk_len
 
-        generation_output = model.generate(
-            input_ids=input_ids[:, -1:],
+        # Final forward pass for the last token
+        last_token_input_ids = input_ids[:, -1:]
+        last_token_pos_id = torch.tensor([[processed_len]], dtype=torch.long, device=device)
+        final_prompt_mask = torch.ones(1, processed_len + 1, dtype=torch.long, device=device)
+
+        outputs = model(
+            input_ids=last_token_input_ids,
             past_key_values=past_key_values,
-            max_length=answer_ids.shape[-1] + 16,
+            position_ids=last_token_pos_id,
             use_cache=True,
-            generation_config=GenerationConfig(do_sample=False, use_cache=True),
         )
-        current_mem = torch.cuda.memory_allocated(device) / 1024**2
-        max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
-        print(f"Memory usage after generate: {current_mem:.2f}MB / {max_mem:.2f}MB")
-    
-    model_output = tokenizer.decode(generation_output[0].cpu())
-    
-    # Find the number after "The pass key is"
-    matches = re.findall(r"is[\D]*(\d+)", model_output)
-    if matches:
-        model_answer = matches[0]  # Take the first match
-    else:
-        model_answer = ""
-    
+        logits = outputs.logits  # Logits for the *next* token
+        past_key_values = outputs.past_key_values  # Final cache after full prompt
+        processed_len += 1
+
+        # Generation stage
+        generated_ids_list = []
+
+        # Get the first generated token ID
+        next_token_logits = logits[:, -1, :]  # Shape [batch_size, vocab_size]
+        next_token_id = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)  # Shape [batch_size, 1]
+
+        for step in range(max_new_tokens):
+            generated_ids_list.append(next_token_id.item())
+
+            # Prepare inputs for the next step model call
+            step_position_ids = torch.tensor([[processed_len]], dtype=torch.long, device=device)
+
+            outputs = model(
+                input_ids=next_token_id,
+                past_key_values=past_key_values,
+                position_ids=step_position_ids,
+                use_cache=True,
+            )
+
+            logits = outputs.logits
+            past_key_values = outputs.past_key_values  # Update cache
+            processed_len += 1  # Sequence length grows
+
+            # Get the ID for the *next* token
+            next_token_logits = logits[:, -1, :]
+            next_token_id = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
+
+    # Decode and evaluate the model's output
+    model_output = tokenizer.decode(generated_ids_list)
+
+    matches = re.findall(r"[\D]*(\d+)", model_output)
+    model_answer = matches[0] if matches else ""
     is_correct = (model_answer == answer)
+    
     print(f"Model's output: {model_output}")
     print(f"Found answer: {model_answer}")
     print(f"Correct answer: {answer}")
     print(f"Is correct: {is_correct}\n")
-    
+
+    # Clean up
+    del past_key_values, input_ids, logits, generated_ids_list, model_output, next_token_id
+    torch.cuda.empty_cache()
+
     return is_correct, len_token
 
 def main(args):
