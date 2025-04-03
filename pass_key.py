@@ -11,23 +11,10 @@ import numpy as np
 from numpy import random
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
-import transformers
-import transformers.generation.utils
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
-from typing import Optional, Union, List, Dict, Any
-
-# Import for text generation inference
-try:
-    import text_generation
-    from text_generation.client import Client as TextGenerationClient
-    has_text_generation = True
-    print("Found text-generation-inference client")
-except ImportError:
-    has_text_generation = False
-    print("text-generation-inference not installed, please run: pip install text-generation")
 
 model_path = "/workspace/RWKV-block/test/v7_goose/.hf_build/v7-1B5-world/"
 
@@ -48,7 +35,7 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('hf_model', type=str)
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=65536, help='minimum token length to start evaluation')
+    parser.add_argument('--min_tokens', type=int, default=1024, help='minimum token length to start evaluation')
     parser.add_argument('--max_tokens', type=int, default=65536, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=1024, help='interval for evaluation')
     parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
@@ -105,235 +92,67 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
     new_context = tokenizer.decode(tokens_new_context)
     return new_context
 
-
 def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed=666):
-    """
-    Test passkey retrieval using text-generation-inference's server mode.
-    This approach specifically leverages TGI's optimized KV caching capability.
-    """
+    # Generate random pass key
     rnd_state = random.get_state()
     random.seed(seed)
     pass_key = random.randint(1, 50000)
     random.set_state(rnd_state)
-
-    # Generate the full prompt with the passkey
+    
     prompt = generate_prompt_landmark(tokenizer, pass_key, context_length=context_length, depth=depth)
     answer = str(pass_key)
-    input_token_ids = tokenizer(prompt, return_tensors=None).input_ids
-    seq_len = len(input_token_ids)
     
-    answer_ids = tokenizer(answer).input_ids
-    max_new_tokens = len(answer_ids) + 20
+    input_ids = tokenizer(prompt, return_tensors="pt").input_ids
+    input_ids = input_ids.to(device)
+    len_token = input_ids.shape[-1]
+
+    print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
+
+    answer_ids = tokenizer(answer, return_tensors="pt").input_ids
     
-    print(f"Prompt length: {seq_len} tokens")
-    print(f"Using text-generation-inference server for proper KV cache handling")
-    
-    # ===== SETUP AND LAUNCH TEXT-GENERATION-INFERENCE SERVER =====
-    
-    # Save model to a temporary directory for TGI server
-    import tempfile
-    import subprocess
-    import time
-    import socket
-    
-    # Find an available port for the server
-    def get_free_port():
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(('', 0))
-            return s.getsockname()[1]
-    
-    port = get_free_port()
-    print(f"Launching TGI server on port {port}")
-    
-    # Save model to a temporary directory
-    temp_dir = tempfile.mkdtemp()
-    model_path = os.path.join(temp_dir, "model")
-    print(f"Saving model to {model_path}")
-    
-    # Save model and tokenizer
-    model.save_pretrained(model_path)
-    tokenizer.save_pretrained(model_path)
-    
-    # Launch TGI server using the model with verbose output and timeout settings
-    server_cmd = [
-        "text-generation-launcher",
-        "--model-id", model_path,
-        "--port", str(port),
-        "--json-output",        # Use JSON for more structured logs
-        "--max-total-tokens", str(seq_len + max_new_tokens),  # Make sure we can handle the full context
-        "--max-input-length", str(seq_len),  # Set max input length
-        "--max-batch-size", "1"  # Simple single-batch mode
-    ]
-    
-    print(f"Server command: {' '.join(server_cmd)}")
-    
-    server_process = None
-    try:
-        # Start TGI server process
-        server_process = subprocess.Popen(
-            server_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        
-        # Wait for server to start
-        print("Waiting for TGI server to start...")
-        time.sleep(10)  # Give server time to initialize
-        
-        # Check if server is running
-        def is_server_running(port):
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                return s.connect_ex(('localhost', port)) == 0
-        
-        if not is_server_running(port):
-            print("Warning: Server may not be running properly")
-            print("Checking server logs...")
-            
-            # Check server output for errors
-            if server_process.poll() is not None:
-                stdout, stderr = server_process.communicate()
-                print("Server stdout:", stdout[:500])
-                print("Server stderr:", stderr[:500])
-                print("Server exited with code:", server_process.returncode)
-            
-            print("Waiting a bit longer for server to start...")
-            time.sleep(10)  # Wait longer
-            
-            # Double check if it's now running
-            if not is_server_running(port):
-                print("Server still not responding")
-            else:
-                print("Server is now responding")
-        
-        # ===== QUERY THE SERVER USING THE TEXT-GENERATION CLIENT =====
-        
-        # Import the client here to ensure it's only used when needed
-        from text_generation import Client as TextGenerationClient
-        
-        # Setup client to connect to our local server
-        client = TextGenerationClient(f"http://localhost:{port}")
-        print("Connected to TGI server - sending request")
-        
-        # IMPORTANT: TGI is specifically designed to handle the KV cache for long context
-        # efficiently under the hood - this is why we're using it
-        response = client.generate(
-            prompt,
-            max_new_tokens=max_new_tokens,
-            # TGI requires temperature > 0, use very small value for deterministic generation
-            temperature=0.01,
-            do_sample=False,
-        )
-        
-        # Extract the generated text
-        model_output = response.generated_text
-        print("Successfully received response from TGI server")
-        
-        # Extract the answer and check correctness
-        matches = re.findall(r"(\d+)", model_output)
-        model_answer = matches[0] if matches else ""
-        is_correct = (model_answer == answer)
-        
-        print(f"Generated Text: '{model_output}'")
-        print(f"Extracted Answer: {model_answer}")
-        print(f"Correct Answer: {answer}")
-        print(f"Result: {'CORRECT' if is_correct else 'INCORRECT'}")
-        
-        return is_correct, seq_len
-        
-    except Exception as e:
-        print(f"Error with TGI approach: {e}")
-        print("Falling back to simple auto-regressive generation")
-        
-        # ===== FALLBACK: TRY DIRECTLY WITH TRANSFORMERS PIPELINE =====
-        
-        print("Trying with HuggingFace Pipeline (this may handle KV cache better)")
-        
-        try:
-            from transformers import pipeline
-            
-            # Create generation pipeline with proper parameters
-            text_generator = pipeline(
-                'text-generation',
-                model=model,
-                tokenizer=tokenizer,
-                device=device,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-                pad_token_id=tokenizer.eos_token_id,
+    CHUNK_SIZE = 2048
+    past_key_values = None
+    chunk_input_ids = input_ids[:, :-1]
+    with torch.no_grad():
+        # Process all tokens in chunks
+        for i in range(0, chunk_input_ids.shape[1], CHUNK_SIZE):
+            chunk = chunk_input_ids[:, i:i + CHUNK_SIZE]
+            outputs = model(
+                chunk,
+                past_key_values=past_key_values,
             )
-            
-            # Generate using pipeline's built-in cache handling
-            output = text_generator(
-                prompt,
-                return_full_text=False,  # Only return the generated part
-            )
-            
-            # Extract the generated text
-            model_output = output[0]['generated_text']
-            
-        except Exception as e:
-            print(f"Pipeline approach failed: {e}")
-            print("Using final fallback approach with direct generation")
-            
-            # Last resort: try to work around cache position bug
-            # Just process the end of the prompt where the answer is likely to be
-            print("Processing only the end of the prompt to avoid memory issues")
-            
-            # Handle just a manageable portion of the end of the prompt
-            max_handle_tokens = min(8192, len(input_token_ids))
-            truncated_tokens = input_token_ids[-max_handle_tokens:]
-            input_ids = torch.tensor([truncated_tokens], device=device)
-            
-            # Generate with truncated context
-            with torch.no_grad():
-                generation_config = GenerationConfig(
-                    max_new_tokens=max_new_tokens,
-                    do_sample=False,
-                    num_beams=1,
-                )
-                
-                output_ids = model.generate(
-                    input_ids=input_ids,
-                    generation_config=generation_config
-                )
-                
-                # Extract just the newly generated part
-                generated_tokens = output_ids[0, len(truncated_tokens):]
-                model_output = tokenizer.decode(generated_tokens, skip_special_tokens=True)
-        
-        # Extract the answer
-        matches = re.findall(r"(\d+)", model_output)
-        model_answer = matches[0] if matches else ""
-        is_correct = (model_answer == answer)
-        
-        print(f"Generated Text: '{model_output}'")
-        print(f"Extracted Answer: {model_answer}")
-        print(f"Correct Answer: {answer}")
-        print(f"Result: {'CORRECT' if is_correct else 'INCORRECT'}")
-        
-        return is_correct, seq_len
-        
-    finally:
-        # Clean up resources
-        if server_process:
-            print("Terminating TGI server")
-            server_process.terminate()
-            try:
-                server_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                server_process.kill()
-                
-        # Clean up the temporary directory
-        import shutil
-        print(f"Cleaning up temporary directory: {temp_dir}")
-        try:
-            shutil.rmtree(temp_dir)
-        except Exception as e:
-            print(f"Error cleaning up: {e}")
-            
-        # Final memory cleanup
-        torch.cuda.empty_cache()
+            current_mem = torch.cuda.memory_allocated(device) / 1024**2
+            max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
+
+            past_key_values = outputs.past_key_values
+
+        generation_output = model.generate(
+            input_ids=input_ids[:, -1:],
+            past_key_values=past_key_values,
+            max_length=answer_ids.shape[-1] + 16,
+            use_cache=True,
+            generation_config=GenerationConfig(do_sample=False, use_cache=True),
+        )
+        current_mem = torch.cuda.memory_allocated(device) / 1024**2
+        max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
+        print(f"Memory usage after generate: {current_mem:.2f}MB / {max_mem:.2f}MB")
+    
+    model_output = tokenizer.decode(generation_output[0].cpu())
+    
+    # Find the number after "The pass key is"
+    matches = re.findall(r"is[\D]*(\d+)", model_output)
+    if matches:
+        model_answer = matches[0]  # Take the first match
+    else:
+        model_answer = ""
+    
+    is_correct = (model_answer == answer)
+    print(f"Model's output: {model_output}")
+    print(f"Found answer: {model_answer}")
+    print(f"Correct answer: {answer}")
+    print(f"Is correct: {is_correct}\n")
+    
+    return is_correct, len_token
 
 def main(args):
     device = "cuda:0"
