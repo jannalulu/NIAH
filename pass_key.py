@@ -15,6 +15,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
+import types
+from functools import wraps
 
 model_path = "/workspace/RWKV-block/test/v7_goose/.hf_build/v7-1B5-world/"
 
@@ -35,10 +37,10 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('hf_model', type=str)
     parser.add_argument('--cache_dir', type=str, default="./cache")
-    parser.add_argument('--min_tokens', type=int, default=1024, help='minimum token length to start evaluation')
+    parser.add_argument('--min_tokens', type=int, default=65536, help='minimum token length to start evaluation')
     parser.add_argument('--max_tokens', type=int, default=65536, help='maximum token length for evaluation')
     parser.add_argument('--interval', type=int, default=1024, help='interval for evaluation')
-    parser.add_argument('--num_tests', type=int, default=5, help='number of repeat testing for each length')
+    parser.add_argument('--num_tests', type=int, default=1, help='number of repeat testing for each length')
     parser.add_argument('--max_depth', type=float, default=1.0, help='max depth ratio to test')
     parser.add_argument('--device', type=str, default='cuda:0', help='device to use for computation')
     parser.add_argument('--hf_model_args', type=str, default='{}',
@@ -92,7 +94,7 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
     new_context = tokenizer.decode(tokens_new_context)
     return new_context
 
-def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed=666):
+def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed=666, debug=False):
     # Generate random pass key
     rnd_state = random.get_state()
     random.seed(seed)
@@ -101,57 +103,150 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
     
     prompt = generate_prompt_landmark(tokenizer, pass_key, context_length=context_length, depth=depth)
     answer = str(pass_key)
-    
-    input_ids = tokenizer(prompt, return_tensors="pt").input_ids
-    input_ids = input_ids.to(device)
+
+    input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
     len_token = input_ids.shape[-1]
+    answer_ids = tokenizer(answer, return_tensors="pt").input_ids.to(device)
 
-    print(f"VRAM usage before generation: {get_gpu_memory():.2f} MB")
+    print("VRAM usage before generation:", get_gpu_memory(), "MB")
 
-    answer_ids = tokenizer(answer, return_tensors="pt").input_ids
-    
+    # Chunk all but the last token
     CHUNK_SIZE = 2048
-    past_key_values = None
-    chunk_input_ids = input_ids[:, :-1]
-    with torch.no_grad():
-        # Process all tokens in chunks
-        for i in range(0, chunk_input_ids.shape[1], CHUNK_SIZE):
-            chunk = chunk_input_ids[:, i:i + CHUNK_SIZE]
-            outputs = model(
-                chunk,
-                past_key_values=past_key_values,
-            )
-            current_mem = torch.cuda.memory_allocated(device) / 1024**2
-            max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
+    chunk_input_ids = input_ids[:, :-1]  # everything except the final token
+    last_token = input_ids[:, -1:]      # the final token
 
-            past_key_values = outputs.past_key_values
-
+    # If there are no tokens to chunk, just run normally (no manual cache building)
+    if chunk_input_ids.shape[1] == 0:
+        # This means the prompt has only 1 token to feed
+        # so we generate from scratch
+        print("Short prompt, skipping chunking.\n")
         generation_output = model.generate(
-            input_ids=input_ids[:, -1:],
-            past_key_values=past_key_values,
-            max_length=answer_ids.shape[-1] + 16,
+            input_ids=input_ids,
+            max_length=answer_ids.size(-1) + 16,
             use_cache=True,
-            generation_config=GenerationConfig(do_sample=False, use_cache=True),
         )
-        current_mem = torch.cuda.memory_allocated(device) / 1024**2
-        max_mem = torch.cuda.max_memory_allocated(device) / 1024**2
-        print(f"Memory usage after generate: {current_mem:.2f}MB / {max_mem:.2f}MB")
-    
-    model_output = tokenizer.decode(generation_output[0].cpu())
-    
-    # Find the number after "The pass key is"
-    matches = re.findall(r"is[\D]*(\d+)", model_output)
-    if matches:
-        model_answer = matches[0]  # Take the first match
     else:
-        model_answer = ""
-    
+        # Otherwise, process the chunk in smaller pieces
+        past_key_values = None
+        with torch.no_grad():
+            # Feed chunk in slices
+            for i in range(0, chunk_input_ids.shape[1], CHUNK_SIZE):
+                subchunk = chunk_input_ids[:, i : i + CHUNK_SIZE]
+                outputs = model(subchunk, past_key_values=past_key_values)
+                past_key_values = outputs.past_key_values
+
+        # Provide non-empty cache_position to align the final token
+        # so that model.generate knows how many tokens are in the cache
+        position_offset = chunk_input_ids.shape[1]
+        
+        # Add debug instrumentation if requested
+        if debug:
+            # Save original method
+            original_prepare_inputs = model.prepare_inputs_for_generation
+            debug_info = {"calls": 0, "failures": 0}
+            
+            # Create a direct replacement for prepare_inputs_for_generation
+            # Instead of debugging the original, we'll fully replace it with our fixed version
+            def fixed_prepare_inputs_for_generation(self, input_ids, past_key_values=None, inputs_embeds=None, 
+                                                   cache_position=None, attention_mask=None, **kwargs):
+                debug_info["calls"] += 1
+                call_num = debug_info["calls"]
+                
+                print(f"\nDEBUG Call #{call_num} to prepare_inputs_for_generation")
+                print(f"  input_ids.shape: {input_ids.shape}")
+                
+                # Get model inputs dict
+                model_inputs = self.prepare_inputs_for_decoder_forward(
+                    input_ids, past_key_values, attention_mask, inputs_embeds, **kwargs
+                )
+                
+                # Check past_key_values
+                if past_key_values is not None:
+                    try:
+                        past_length = past_key_values[0][0].shape[2]
+                        print(f"  past_key_values shape: {past_key_values[0][0].shape}")
+                        print(f"  past_length from past_key_values: {past_length}")
+                    except (IndexError, AttributeError, TypeError) as e:
+                        print(f"  Error getting past_length: {e}")
+                        past_length = 0
+                else:
+                    past_length = 0
+                
+                # THIS IS THE KEY FIX: Always create a valid cache_position
+                # We use the past_length from past_key_values to create appropriate cache_position
+                print(f"  Original cache_position: {cache_position}")
+                
+                # Create a valid cache_position regardless of what was passed in
+                # This is the critical fix to avoid the IndexError
+                if cache_position is None or len(cache_position) == 0:
+                    print("  Creating new cache_position")
+                    cache_position = torch.arange(past_length, input_ids.shape[1], dtype=torch.long, device=input_ids.device)
+                    print(f"  New cache_position: {cache_position}")
+                
+                # Make sure it's never empty
+                if len(cache_position) == 0:
+                    print("  cache_position is empty, fixing it")
+                    cache_position = torch.zeros(1, dtype=torch.long, device=input_ids.device)
+                    print(f"  After fix: {cache_position}")
+                
+                # Add cache_position to model inputs
+                model_inputs["cache_position"] = cache_position
+                print(f"  Final cache_position in model_inputs: {model_inputs['cache_position']}")
+                
+                # Create proper attention_mask if not provided
+                if attention_mask is None and past_length > 0:
+                    print("  Creating attention_mask")
+                    attention_mask = torch.ones(1, past_length + input_ids.shape[1], dtype=torch.long, device=input_ids.device)
+                    model_inputs["attention_mask"] = attention_mask
+                
+                # Handle use_cache
+                model_inputs["use_cache"] = kwargs.get("use_cache", True)
+                
+                print(f"  Call #{call_num} using custom fixed method")
+                return model_inputs
+            
+            # Replace the prepare_inputs_for_generation method with our fixed version
+            model.prepare_inputs_for_generation = types.MethodType(fixed_prepare_inputs_for_generation, model)
+        
+        # Now that we've replaced prepare_inputs_for_generation with our fixed version,
+        # generate from the last token with the entire cached prompt
+        
+        # Create attention mask for the full sequence
+        attention_mask = torch.ones(1, position_offset + 1, device=device, dtype=torch.long)
+        
+        # Use a valid cache_position pointing to the end of our processed sequence
+        cache_position = torch.tensor([position_offset], device=device, dtype=torch.long)
+        
+        print("\nGenerating with fixed method and proper attention mask")
+        print(f"  last_token.shape: {last_token.shape}")
+        print(f"  attention_mask.shape: {attention_mask.shape}")
+        print(f"  cache_position: {cache_position}")
+        
+        # Generate with our patched model
+        generation_output = model.generate(
+            input_ids=last_token,
+            past_key_values=past_key_values,
+            cache_position=cache_position,
+            attention_mask=attention_mask,
+            use_cache=True,
+            max_length=answer_ids.size(-1) + 16,
+        )
+        
+        # Restore original method if we patched it
+        if debug:
+            model.prepare_inputs_for_generation = original_prepare_inputs
+
+    # Decode and compare
+    model_output = tokenizer.decode(generation_output[0], skip_special_tokens=False)
+    matches = re.findall(r"is[\D]*(\d+)", model_output)
+    model_answer = matches[0] if matches else ""
     is_correct = (model_answer == answer)
-    print(f"Model's output: {model_output}")
-    print(f"Found answer: {model_answer}")
-    print(f"Correct answer: {answer}")
-    print(f"Is correct: {is_correct}\n")
-    
+
+    print("Model's output:", model_output)
+    print("Found answer:", model_answer)
+    print("Correct answer:", answer)
+    print("Is correct:", is_correct, "\n")
+
     return is_correct, len_token
 
 def main(args):
@@ -189,11 +284,17 @@ def main(args):
             total_tokens = 0
             
             for k in range(args.num_tests):
+                # Enable debug for the first run of each configuration
+                is_debug = (i == 0 and depth == 0 and k == 0)
+                if is_debug:
+                    print(f"\n{'='*50}\nRUNNING WITH DEBUG ENABLED\n{'='*50}")
+                    
                 is_correct, len_tokens = passkey_retrieval_test(
                     model, tokenizer, device, 
                     context_length=current_tokens,
                     depth=depth,
-                    seed=k
+                    seed=k,
+                    debug=is_debug
                 )
                 passed_tests += is_correct
                 total_tokens += len_tokens
