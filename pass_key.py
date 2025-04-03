@@ -1,7 +1,7 @@
 import os
 import math
 import fla
-from transformers import GenerationConfig
+from transformers import GenerationConfig, TextStreamer
 import torch
 import json
 import argparse
@@ -10,13 +10,16 @@ import re
 import numpy as np
 from numpy import random
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 import transformers
 import transformers.generation.utils
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
+from typing import Optional, Union, List, Dict, Any
+import threading
+from queue import Queue
 
 model_path = "/workspace/RWKV-block/test/v7_goose/.hf_build/v7-1B5-world/"
 
@@ -94,8 +97,12 @@ def generate_prompt_landmark(tokenizer, pass_key, context_length, depth, final_c
     new_context = tokenizer.decode(tokens_new_context)
     return new_context
 
-def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed=666):
 
+def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed=666):
+    """
+    Test passkey retrieval using TextIteratorStreamer for efficient KV cache management.
+    This approach uses HuggingFace's streaming functionality which handles KV caching better.
+    """
     rnd_state = random.get_state()
     random.seed(seed)
     pass_key = random.randint(1, 50000)
@@ -109,104 +116,126 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
 
     answer_ids = tokenizer(answer).input_ids
     max_new_tokens_to_generate = len(answer_ids) + 20
+    
+    print(f"Prompt length: {seq_len} tokens")
+    print(f"Using TextIteratorStreamer for chunked generation with proper KV caching")
 
-    past_key_values = None
-    processed_len = 0
-    prefill_ids = input_ids[:, :-1]
-    prefill_len = prefill_ids.shape[1]
-    chunk_size = 2048
-
-    with torch.no_grad():
-        for i in range(0, prefill_len, chunk_size):
-            chunk = prefill_ids[:, i : min(i + chunk_size, prefill_len)]
-            chunk_len = chunk.shape[1]
-
-            # We don't necessarily need attention_mask/position_ids for simple forward pass
-            # unless the model specifically requires it internally even during prefill.
-            # Let's omit them first to see if it simplifies things and still works.
-            try:
-                outputs = model(
-                    input_ids=chunk,
-                    past_key_values=past_key_values,
-                    use_cache=True, # Crucial for building the cache
-                )
-                past_key_values = outputs.past_key_values
-                processed_len += chunk_len
-                # Cleanup inside loop
-                del outputs, chunk
-                if i % (chunk_size * 5) == 0: # Less frequent cleanup
-                    torch.cuda.empty_cache()
-
-            except Exception as e:
-                 del past_key_values; torch.cuda.empty_cache()
-                 raise e # Stop the test if prefill fails
-
-        print(f"\nPrefill completed. Processed {processed_len} tokens.")
-
-        # --- Prepare Inputs for model.generate() ---
-        last_token_input_ids = input_ids[:, -1:]
-        # The position ID for the token we are feeding is the length of the sequence processed so far
-        final_position_ids = torch.tensor([[processed_len]], dtype=torch.long, device=device)
-        # The attention mask must cover the *entire* sequence length up to and including the token we are feeding
-        final_attention_mask = torch.ones(1, processed_len + 1, dtype=torch.long, device=device)
-
-        # --- Create GenerationConfig ---
-        # Ensure greedy search parameters
-        generation_config = GenerationConfig(
-            max_new_tokens=max_new_tokens_to_generate,
-            use_cache=True,
-            do_sample=False,
-        )
+    # Setup streamer for token-by-token generation (better KV cache handling)
+    streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+    
+    # Configure greedy generation
+    generation_config = GenerationConfig(
+        max_new_tokens=max_new_tokens_to_generate,
+        use_cache=True,
+        do_sample=False,
+    )
+    
+    model_output = ""
+    
+    try:
+        # First approach: Chunked generation with TextIteratorStreamer
+        # The streamer handles token-by-token generation with proper KV cache management
         
-        # Robust approach: try with KV cache first, fall back to full sequence if needed
-        print("Attempting generation with KV cache first...")
+        generation_kwargs = {
+            "input_ids": input_ids,
+            "generation_config": generation_config,
+            "streamer": streamer,
+            "return_dict_in_generate": True
+        }
+        
+        # Run generation in a separate thread
+        thread = threading.Thread(target=model.generate, kwargs=generation_kwargs)
+        thread.start()
+        
+        # Collect generated tokens from streamer
+        for token in streamer:
+            model_output += token
+        
+        thread.join()
+        
+        print(f"Streamer generation successful")
+        
+    except Exception as e:
+        print(f"Error with streamer approach: {e}")
+        print("Trying fallback method...")
+        
         try:
-            # First attempt: use KV cache (skipping position_ids which can cause issues)
+            # Second approach: Full context at once (may OOM for very long contexts)
             generation_output = model.generate(
-                input_ids=last_token_input_ids,
-                past_key_values=past_key_values,
-                attention_mask=final_attention_mask,
+                input_ids=input_ids,
                 generation_config=generation_config
             )
-            print(f"Generation with KV cache successful, output shape: {generation_output.shape}")
-        
-        except Exception as e:
-            # Handle any error with KV cache approach
-            print(f"Error with KV cache approach: {e}")
-            print("Trying alternative approach with full sequence...")
+            
+            # Extract generated tokens (excluding prompt)
+            if generation_output.shape[1] > input_ids.shape[1]:
+                model_output_ids = generation_output[0, input_ids.shape[1]:]
+                model_output = tokenizer.decode(model_output_ids.cpu(), skip_special_tokens=True)
+            else:
+                print("Warning: No new tokens generated")
+                model_output = ""
+                
+        except Exception as e2:
+            # Third approach: Try the original chunked approach as last resort
+            print(f"Error with full sequence approach: {e2}")
+            print("Trying original chunked approach...")
             
             try:
-                # Second attempt: use the full sequence (safer but potentially OOM for large contexts)
-                generation_output = model.generate(
-                    input_ids=input_ids,  # Full sequence
-                    generation_config=generation_config
-                )
-                print(f"Full sequence generation successful, output shape: {generation_output.shape}")
-                
-                # Extract just the newly generated tokens for consistency
-                if generation_output.shape[1] > input_ids.shape[1]:
-                    new_tokens = generation_output[:, input_ids.shape[1]:]
-                    generation_output = torch.cat([last_token_input_ids, new_tokens], dim=1)
-                    print(f"Extracted new tokens, shape now: {generation_output.shape}")
-            except Exception as e2:
-                print(f"Error with full sequence approach: {e2}")
+                past_key_values = None
+                processed_len = 0
+                prefill_ids = input_ids[:, :-1]
+                prefill_len = prefill_ids.shape[1]
+                chunk_size = 2048
+
+                with torch.no_grad():
+                    # Process in chunks to build KV cache
+                    for i in range(0, prefill_len, chunk_size):
+                        chunk = prefill_ids[:, i : min(i + chunk_size, prefill_len)]
+                        chunk_len = chunk.shape[1]
+
+                        outputs = model(
+                            input_ids=chunk,
+                            past_key_values=past_key_values,
+                            use_cache=True,
+                        )
+                        past_key_values = outputs.past_key_values
+                        processed_len += chunk_len
+                        
+                        # Cleanup inside loop
+                        del outputs, chunk
+                        if i % (chunk_size * 5) == 0:
+                            torch.cuda.empty_cache()
+
+                    # Generate with KV cache
+                    last_token_input_ids = input_ids[:, -1:]
+                    final_attention_mask = torch.ones(1, processed_len + 1, dtype=torch.long, device=device)
+                    
+                    generation_output = model.generate(
+                        input_ids=last_token_input_ids,
+                        past_key_values=past_key_values,
+                        attention_mask=final_attention_mask,
+                        generation_config=generation_config
+                    )
+                    
+                    # Extract generated tokens
+                    if generation_output.shape[1] > last_token_input_ids.shape[1]:
+                        model_output_ids = generation_output[0, last_token_input_ids.shape[1]:]
+                        model_output = tokenizer.decode(model_output_ids.cpu(), skip_special_tokens=True)
+                    else:
+                        model_output = ""
+                        
+                    # Cleanup
+                    del past_key_values, input_ids, generation_output
+                    if 'model_output_ids' in locals():
+                        del model_output_ids
+                    torch.cuda.empty_cache()
+                    
+            except Exception as e3:
+                print(f"All generation approaches failed: {e3}")
                 import traceback
                 traceback.print_exc()
-                return False, seq_len  # Indicate failure
-        
-        print(f"model.generate() finished. Output shape: {generation_output.shape}")
+                return False, seq_len
     
-    # --- Process Results ---
-    # The output sequence includes the input token(s) provided to generate()
-    # Since we provided only the last token (shape [1, 1]), we skip the first token in the output.
-    if generation_output.shape[1] > last_token_input_ids.shape[1]:
-        model_output_ids = generation_output[0, last_token_input_ids.shape[1]:]
-    else:
-        print("Warning: Generation output size <= input size. No new tokens generated?")
-        model_output_ids = torch.tensor([], dtype=torch.long, device=device)
-
-    model_output = tokenizer.decode(model_output_ids.cpu(), skip_special_tokens=True)
-
+    # Extract and evaluate the numeric answer
     matches = re.findall(r"(\d+)", model_output)
     model_answer = matches[0] if matches else ""
     is_correct = (model_answer == answer)
@@ -216,10 +245,9 @@ def passkey_retrieval_test(model, tokenizer, device, context_length, depth, seed
     print(f"Correct Answer: {answer}")
     print(f"Result: {'CORRECT' if is_correct else 'INCORRECT'}")
 
-    # Final cleanup
-    del past_key_values, input_ids, generation_output, model_output_ids
+    # Ensure cleanup
     torch.cuda.empty_cache()
-
+    
     return is_correct, seq_len
 
 def main(args):
