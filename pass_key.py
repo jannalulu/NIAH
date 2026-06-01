@@ -18,6 +18,37 @@ import seaborn as sns
 
 model_path = "/workspace/RWKV-block/test/v7_goose/.hf_build/v7-1B5-world/"
 
+def cluster_token_labels(values, tolerance=2):
+    """Combine context-length labels that are within `tolerance` tokens of each other.
+
+    Tokenization makes the measured token count drift by a token or two between
+    depth rows of the same target length, which otherwise produces many
+    near-duplicate heatmap columns. This snaps each run of values whose neighbours
+    are <= tolerance apart to a single representative label (the rounded mean).
+
+    Args:
+        values: iterable of integer token counts.
+        tolerance: max gap (in tokens) between adjacent values to merge.
+
+    Returns:
+        dict mapping each original value to its combined label.
+    """
+    sorted_vals = sorted(set(values))
+    mapping = {}
+    cluster = []
+    for v in sorted_vals:
+        if cluster and v - cluster[-1] > tolerance:
+            rep = int(round(sum(cluster) / len(cluster)))
+            for m in cluster:
+                mapping[m] = rep
+            cluster = []
+        cluster.append(v)
+    if cluster:
+        rep = int(round(sum(cluster) / len(cluster)))
+        for m in cluster:
+            mapping[m] = rep
+    return mapping
+
 def get_gpu_memory():
     """Returns the current GPU memory usage in MB."""
     torch.cuda.synchronize()
@@ -265,7 +296,11 @@ def main(args):
     # Create visualization
     df = pd.DataFrame(all_accuracies)
     cmap = LinearSegmentedColormap.from_list("custom_cmap", ["#F0496E", "#EBB839", "#0CD79F"])
-    
+
+    # Combine context-length labels that differ by only 1-2 tokens
+    label_map = cluster_token_labels(df['Context Length'], tolerance=2)
+    df['Context Length'] = df['Context Length'].map(label_map)
+
     pivot_table = pd.pivot_table(
         df, values='Score', index=['Document Depth', 'Context Length'], 
         aggfunc='mean'
